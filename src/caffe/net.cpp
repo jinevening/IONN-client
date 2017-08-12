@@ -5,10 +5,13 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio.hpp>
+
 #include "hdf5.h"
 
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
+#include "caffe/layers/input_layer.hpp"
 #include "caffe/net.hpp"
 #include "caffe/parallel.hpp"
 #include "caffe/proto/caffe.pb.h"
@@ -16,6 +19,11 @@
 #include "caffe/util/insert_splits.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
+
+#define BUFF_SIZE 1024*1024*64
+#define PORT 7675
+
+using boost::asio::ip::tcp;
 
 namespace caffe {
 
@@ -605,6 +613,99 @@ Dtype Net<Dtype>::ForwardTo(int end) {
 }
 
 template <typename Dtype>
+void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
+
+  boost::asio::io_service io_service;
+  tcp::socket s(io_service);
+  tcp::resolver resolver(io_service);
+  tcp::resolver::query query(tcp::v4(), "147.46.116.186", "7675");
+  tcp::resolver::iterator iter = resolver.resolve(query);
+  boost::asio::connect(s, iter);
+
+  // struct sockaddr_in server_addr;
+  unsigned char* buff = new unsigned char[BUFF_SIZE];
+  memset(buff, 0, sizeof(BUFF_SIZE));
+
+  int start = 0;
+  int end = 0;
+  list< pair<int, int> >::iterator i;
+  for (i = plan->begin(); i != plan->end(); ++i) {
+    int offloading_point = (*i).first;
+    int resume_point = (*i).second;
+    int model_size = 0;
+    int feature_size = 0;
+    int total_size = 0;
+    CHECK_EQ(sizeof(int), 4);
+    ForwardFromTo(start, offloading_point - 1);
+
+    // Serialize partial model blobs
+    NetParameter net_param;
+    ToProto(&net_param, false, offloading_point, resume_point);
+    model_size = net_param.ByteSize();
+    net_param.SerializeWithCachedSizesToArray(buff + 8);
+    cout << "Partial model blobs size : " << model_size << " bytes" << endl;
+
+    // Serialize feature data
+    BlobProto feature_proto;
+    bottom_vecs_[offloading_point][0]->ToProto(&feature_proto, false);
+    feature_size = feature_proto.ByteSize();
+    feature_proto.SerializeWithCachedSizesToArray(buff + model_size + 8);
+    cout << "Feature blob size : " << feature_size << " bytes" << endl;
+
+    total_size = model_size + feature_size;
+
+    memcpy(buff, &total_size, 4);
+    memcpy(buff + 4, &model_size, 4);
+
+    // Send offloading request to the server
+    // write(client_socket, buff, 8 + total_size);
+    boost::asio::write(s, boost::asio::buffer(buff, 8 + total_size));
+
+    int output_size = 0;	// output size
+    unsigned char* buffer_ptr = buff;
+    try {
+      // Receive Data
+      do {
+        boost::system::error_code error;
+        size_t length = s.read_some(boost::asio::buffer(buffer_ptr, BUFF_SIZE), error);
+	if (buff == buffer_ptr) {
+	  memcpy(&output_size, buff, 4);
+	  cout << "Total size " << output_size << " bytes" << endl;
+	}
+        buffer_ptr += length;
+        cout << "Received data so far : " << buffer_ptr - buff << endl;
+        if (error == boost::asio::error::eof)
+          break; // Connection closed cleanly by peer.
+        else if (error)
+          throw boost::system::system_error(error); // Some other error.
+      } while ((buffer_ptr - buff) < output_size + 4);
+    }
+    catch (std::exception& e) {
+      std::cerr << "Exception in thread: " << e.what() << "\n";
+      return;
+    }
+    cout << "Received " << buffer_ptr - buff << " bytes" << endl;
+
+    // Receive results
+    // int valread = recv(client_socket, buff, BUFF_SIZE, 0);
+    // cout << "Received " << valread << " bytes" << endl;
+    BlobProto received_data;
+    received_data.ParseFromArray(buff + 4, output_size);
+    // give input after receiving data
+    bottom_vecs_[resume_point][0]->FromProto(received_data);
+
+    // set next starting point
+    start = resume_point;
+    end = offloading_point;
+  }
+  if (end != layers_.size() - 1) {
+    ForwardFromTo(end, layers_.size() - 1);
+  }
+
+  delete buff;
+}
+
+template <typename Dtype>
 const vector<Blob<Dtype>*>& Net<Dtype>::Forward(Dtype* loss) {
   if (loss != NULL) {
     *loss = ForwardFromTo(0, layers_.size() - 1);
@@ -907,6 +1008,46 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff) const {
     LayerParameter* layer_param = param->add_layer();
     layers_[i]->ToProto(layer_param, write_diff);
   }
+}
+
+template <typename Dtype>
+void Net<Dtype>::ToProto(NetParameter* param, bool write_diff, int start, int end) const {
+  param->Clear();
+  param->set_name(name_);
+
+  // Add a dummy input layer
+  LayerParameter* layer_param = param->add_layer();
+  layer_param->set_name("data");
+  layer_param->set_type("Input");
+  layer_param->add_top();
+  layer_param->set_top(0, "data");
+  InputParameter* input_param = new InputParameter();
+  input_param->add_shape();
+  for (int i = 0; i < bottom_vecs_[start].size(); i++) {
+    // cout << "# of input (must be 1): " << bottom_vecs_[start].size() << endl;
+    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(0));
+    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(1));
+    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(2));
+    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(3));
+  }
+  layer_param->set_allocated_input_param(input_param);
+
+  // Set next layer's bottom as \"data\"
+  // We save original name of the bottom in advance
+  // assumption : the first layer of offloaded partition has only one input
+  LayerParameter& tmp = const_cast<LayerParameter&>(layers_[start]->layer_param());
+  string tmp_bottom = tmp.bottom(0);
+  tmp.set_bottom(0, "data");
+
+  // Serialize layers
+  DLOG(INFO) << "Serializing " << (end - start + 1) << " layers";
+  for (int i = start; i <= end; ++i) {
+    layer_param = param->add_layer();
+    layers_[i]->ToProto(layer_param, write_diff);
+  }
+
+  // Recover the saved bottom
+  tmp.set_bottom(0, tmp_bottom);
 }
 
 template <typename Dtype>

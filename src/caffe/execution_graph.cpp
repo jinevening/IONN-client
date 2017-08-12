@@ -31,6 +31,7 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
       current_layer = new ExecutionGraphLayer(layer_name);
       graph_layers_.push_back(current_layer);
       layer_names_index_[layer_name] = layer_id++;
+      current_layer->start_layer_id = i;
 
       // set input feature size of current layer
       for (int j = 0; j < net_->bottom_vecs()[i].size(); j++) {
@@ -55,6 +56,8 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
     //current_layer->exec_time_s += 1.0;
     current_layer->exec_time_c += 1.0;
     current_layer->exec_time_s += layers[i]->get_exec_time_s();
+
+    current_layer->end_layer_id = i;
   }
 }
 void ExecutionGraph::printLayers() {
@@ -226,15 +229,17 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
 
 	cout << "Shortest path from src to dst" << endl;
 	int node = V-1;
-  int resume_point = 0;
+  int resume_node = 0;
 	while (node != src) {
-
     if (!isServerNode(opt_target, node) && isServerNode(opt_target, path[node])) {
-      resume_point = node;
+      resume_node = node;
     }
     else if (isServerNode(opt_target, node) && !isServerNode(opt_target, path[node])) {
-      result->push_front(make_pair(path[node], resume_point));
-      resume_point = 0;
+      // get index of real caffe layers
+      int offloading_point = graph_layers_[(path[node] - 1)/4]->end_layer_id;
+      int resume_point = graph_layers_[(resume_node - 1)/4]->start_layer_id;
+
+      result->push_front(make_pair(offloading_point, resume_point));
     }
 
 		cout << node << " ";

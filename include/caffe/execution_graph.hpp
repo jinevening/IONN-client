@@ -54,6 +54,10 @@ class ExecutionGraphLayer {
   // input/output of this layer
   float input_s;
   float output_s;
+
+  // ID mapping with real caffe layers
+  int start_layer_id;
+  int end_layer_id;
 };
 
 /**
