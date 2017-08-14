@@ -53,7 +53,7 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
     // update execution time
     //current_layer->exec_time_c += 1.0;
     //current_layer->exec_time_s += 1.0;
-    current_layer->exec_time_c += 1.0;
+    current_layer->exec_time_c += layers[i]->get_exec_time_c();
     current_layer->exec_time_s += layers[i]->get_exec_time_s();
   }
 }

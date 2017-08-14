@@ -253,6 +253,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   ShareWeights();
   debug_info_ = param.debug_info();
   server_predict();
+  client_predict();
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
 }
 
@@ -369,9 +370,9 @@ void Net<Dtype>::server_predict(){
 			if(conv_param.pad_size() > 0)Pad = conv_param.pad(0);
 			if(conv_param.stride_size() > 0)Stride = conv_param.stride(0);
 			InputSize = ((bottom_vecs_[i][0]->shape(2) + 2 * Pad - conv_param.kernel_size(0)) / Stride) + 1;
-			execution_time = (1.1261e-6) * (InputSize * InputSize * conv_param.num_output()
+			execution_time = (8.914e-7) * (InputSize * InputSize * conv_param.num_output()
 					* bottom_vecs_[i][0]->shape(1) * conv_param.kernel_size(0)
-					* conv_param.kernel_size(0)) - 0.0919272073;
+					* conv_param.kernel_size(0)) + 1.2969363802;
 		}
 		else if(TypeName == "ReLU"){
 			execution_time = (8.7878e-6) * (InputSize) + 0.0040442887;
@@ -382,16 +383,8 @@ void Net<Dtype>::server_predict(){
 			if(pool_param.has_pad())Pad = pool_param.pad();
 			if(pool_param.has_stride())Stride = pool_param.stride();
 			InputSize = ((bottom_vecs_[i][0]->shape(2) + 2 * Pad - pool_param.kernel_size()) / Stride) + 1;
-			if(pool_param.PoolMethod_Name(pool_param.pool()) == "MAX"){
-				execution_time = (3.05740e-5) * (InputSize * InputSize * bottom_vecs_[i][0]->shape(1)
-						* sqrt(pool_param.kernel_size())
-						* pool_param.kernel_size()) - 0.9769413041;
-			}
-			else{
-				execution_time = (1.82697e-5) * (InputSize * InputSize * bottom_vecs_[i][0]->shape(1)
-						* sqrt(pool_param.kernel_size())
-						* pool_param.kernel_size()) - 0.0784910958;
-			}
+			execution_time = (4.33449e-5) * (InputSize * InputSize * bottom_vecs_[i][0]->shape(1)
+					* pool_param.kernel_size()) + 1.9214767188;
 		}
 		else if(TypeName == "LRN"){
 		}
@@ -405,12 +398,26 @@ void Net<Dtype>::server_predict(){
 		else if(TypeName == "InnerProduct"){
 			const InnerProductParameter& innerproduct_param = layer_param.inner_product_param();
 			InputSize *= innerproduct_param.num_output();
-			execution_time = (2.1836e-6) * (InputSize) + 1.5864451922;
+			execution_time = (2.2017e-6) * (InputSize) - 0.1782820183;
 		}
 		else if(TypeName == "Softmax"){
 			execution_time = (1.753362e-4) * (InputSize) + 0.0126747067;
 		}
 		layers_[i]->set_exec_time_s(execution_time);
+	}
+}
+
+// Client side prediction model 
+template <typename Dtype>
+void Net<Dtype>::client_predict(){
+	std::ifstream predictionModel("prediction_model.txt", ios::in);
+	string line;
+	if(predictionModel.is_open()){
+		int i = -1;
+		while(getline(predictionModel, line) && i++ < (int)layers_.size()){
+			layers_[i]->set_exec_time_c(atof(line.substr(line.rfind(' ')).c_str()));
+		}
+		predictionModel.close();
 	}
 }
 

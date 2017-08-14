@@ -404,6 +404,10 @@ int time() {
       << iter_timer.MilliSeconds() << " ms.";
   }
   LOG(INFO) << "Average time per layer: ";
+  
+  // Open prediction model file
+  ofstream predictionModel("prediction_model.txt", ios::out);
+
   for (int i = 0; i < layers.size(); ++i) {
     const caffe::string& layername = layers[i]->layer_param().name();
     LOG(INFO) << std::setfill(' ') << std::setw(10) << layername <<
@@ -412,8 +416,12 @@ int time() {
     LOG(INFO) << std::setfill(' ') << std::setw(10) << layername  <<
       "\tbackward: " << backward_time_per_layer[i] / 1000 /
       FLAGS_iterations << " ms.";
+	// Save client's layer execution time
+	predictionModel << i << " " << layername << " " << forward_time_per_layer[i] / 1000 / FLAGS_iterations << std::endl;
   }
+  predictionModel.close();
   total_timer.Stop();
+  LOG(INFO) << "Prediction Model Saved.";
   LOG(INFO) << "Average Forward pass: " << forward_time / 1000 /
     FLAGS_iterations << " ms.";
   LOG(INFO) << "Average Backward pass: " << backward_time / 1000 /
