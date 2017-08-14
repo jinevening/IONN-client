@@ -2,6 +2,7 @@
 #define CAFFE_NET_HPP_
 
 #include <map>
+#include <list>
 #include <set>
 #include <string>
 #include <utility>
@@ -11,6 +12,8 @@
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
+
+using namespace std;
 
 namespace caffe {
 
@@ -30,6 +33,12 @@ class Net {
 
   /// @brief Initialize a network with a NetParameter.
   void Init(const NetParameter& param);
+
+  /**
+   * @brief Run Forward given a partitioning plan.
+   *
+   */
+  void Forward(list<pair<int, int> >* plan, Dtype* loss = NULL);
 
   /**
    * @brief Run Forward and return the result.
@@ -116,6 +125,8 @@ class Net {
   void CopyTrainedLayersFromHDF5(const string trained_filename);
   /// @brief Writes the net to a proto.
   void ToProto(NetParameter* param, bool write_diff = false) const;
+  /// @brief Writes the partial net to a proto
+  void ToProto(NetParameter* param, bool write_diff, int start, int end) const;
   /// @brief Writes the net to an HDF5 file.
   void ToHDF5(const string& filename, bool write_diff = false) const;
 
