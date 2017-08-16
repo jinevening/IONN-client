@@ -634,7 +634,6 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
   memset(buff, 0, sizeof(BUFF_SIZE));
 
   int start = 0;
-  int end = 0;
   list< pair<int, int> >::iterator i;
   for (i = plan->begin(); i != plan->end(); ++i) {
     int offloading_point = (*i).first;
@@ -643,7 +642,8 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     int feature_size = 0;
     int total_size = 0;
     CHECK_EQ(sizeof(int), 4);
-    ForwardFromTo(start, offloading_point - 1);
+    if (offloading_point > 1)
+      ForwardFromTo(start, offloading_point - 1);
 
     // Serialize partial model blobs
     NetParameter net_param;
@@ -654,7 +654,12 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 
     // Serialize feature data
     BlobProto feature_proto;
-    bottom_vecs_[offloading_point][0]->ToProto(&feature_proto, false);
+    if (offloading_point == 0) {
+      net_input_blobs_[0]->ToProto(&feature_proto, false);
+    }
+    else {
+      bottom_vecs_[offloading_point][0]->ToProto(&feature_proto, false);
+    }
     feature_size = feature_proto.ByteSize();
     feature_proto.SerializeWithCachedSizesToArray(buff + model_size + 8);
     cout << "Feature blob size : " << feature_size << " bytes" << endl;
@@ -675,12 +680,12 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
       do {
         boost::system::error_code error;
         size_t length = s.read_some(boost::asio::buffer(buffer_ptr, BUFF_SIZE), error);
-	if (buff == buffer_ptr) {
-	  memcpy(&output_size, buff, 4);
-	  cout << "Total size " << output_size << " bytes" << endl;
-	}
+        if (buff == buffer_ptr) {
+          memcpy(&output_size, buff, 4);
+          cout << "Total size " << output_size << " bytes" << endl;
+        }
         buffer_ptr += length;
-        cout << "Received data so far : " << buffer_ptr - buff << endl;
+//        cout << "Received data so far : " << buffer_ptr - buff << endl;
         if (error == boost::asio::error::eof)
           break; // Connection closed cleanly by peer.
         else if (error)
@@ -699,14 +704,13 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     BlobProto received_data;
     received_data.ParseFromArray(buff + 4, output_size);
     // give input after receiving data
-    bottom_vecs_[resume_point][0]->FromProto(received_data);
+    bottom_vecs_[resume_point + 1][0]->FromProto(received_data);
 
     // set next starting point
-    start = resume_point;
-    end = offloading_point;
+    start = resume_point + 1;
   }
-  if (end != layers_.size() - 1) {
-    ForwardFromTo(end, layers_.size() - 1);
+  if (start < layers_.size()) {
+    ForwardFromTo(start, layers_.size() - 1);
   }
 
   delete buff;
@@ -1021,40 +1025,51 @@ template <typename Dtype>
 void Net<Dtype>::ToProto(NetParameter* param, bool write_diff, int start, int end) const {
   param->Clear();
   param->set_name(name_);
+  LayerParameter* layer_param;
 
-  // Add a dummy input layer
-  LayerParameter* layer_param = param->add_layer();
-  layer_param->set_name("data");
-  layer_param->set_type("Input");
-  layer_param->add_top();
-  layer_param->set_top(0, "data");
-  InputParameter* input_param = new InputParameter();
-  input_param->add_shape();
-  for (int i = 0; i < bottom_vecs_[start].size(); i++) {
-    // cout << "# of input (must be 1): " << bottom_vecs_[start].size() << endl;
-    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(0));
-    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(1));
-    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(2));
-    input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(3));
-  }
-  layer_param->set_allocated_input_param(input_param);
-
-  // Set next layer's bottom as \"data\"
-  // We save original name of the bottom in advance
+  // If the first layer of the offloaded partition is not the input layer,
+  // Then we add dummy input layer and set the next layer's bottom as "data"
   // assumption : the first layer of offloaded partition has only one input
-  LayerParameter& tmp = const_cast<LayerParameter&>(layers_[start]->layer_param());
-  string tmp_bottom = tmp.bottom(0);
-  tmp.set_bottom(0, "data");
-
-  // Serialize layers
-  DLOG(INFO) << "Serializing " << (end - start + 1) << " layers";
-  for (int i = start; i <= end; ++i) {
+  if (start != 0) {
     layer_param = param->add_layer();
-    layers_[i]->ToProto(layer_param, write_diff);
-  }
+    // Add a dummy input layer
+    layer_param->set_name("data");
+    layer_param->set_type("Input");
+    layer_param->add_top();
+    layer_param->set_top(0, "data");
+    InputParameter* input_param = new InputParameter();
+    input_param->add_shape();
+    for (int i = 0; i < bottom_vecs_[start].size(); i++) {
+      // cout << "# of input (must be 1): " << bottom_vecs_[start].size() << endl;
+      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(0));
+      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(1));
+      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(2));
+      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(3));
+    }
+    layer_param->set_allocated_input_param(input_param);
 
-  // Recover the saved bottom
-  tmp.set_bottom(0, tmp_bottom);
+    LayerParameter& tmp = const_cast<LayerParameter&>(layers_[start]->layer_param());
+    string tmp_bottom = tmp.bottom(0);
+    tmp.set_bottom(0, "data");
+
+    // Serialize layers
+    cout << "Serializing " << (end - start + 1) << " layers" << endl;
+    for (int i = start; i <= end; ++i) {
+      layer_param = param->add_layer();
+      layers_[i]->ToProto(layer_param, write_diff);
+    }
+
+    // Recover the saved bottom
+    tmp.set_bottom(0, tmp_bottom);
+  }
+  else {
+    // Serialize layers
+    cout << "Serializing " << (end - start + 1) << " layers" << endl;
+    for (int i = start; i <= end; ++i) {
+      layer_param = param->add_layer();
+      layers_[i]->ToProto(layer_param, write_diff);
+    }
+  }
 }
 
 template <typename Dtype>
