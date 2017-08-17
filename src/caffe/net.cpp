@@ -1053,10 +1053,9 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff, int start, int en
     input_param->add_shape();
     for (int i = 0; i < bottom_vecs_[start].size(); i++) {
       // cout << "# of input (must be 1): " << bottom_vecs_[start].size() << endl;
-      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(0));
-      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(1));
-      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(2));
-      input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(3));
+      for (int j = 0; j < bottom_vecs_[start][i]->num_axes(); j++) {
+        input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(j));
+      }
     }
     layer_param->set_allocated_input_param(input_param);
 
