@@ -364,26 +364,36 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
 // Prediction Model
 template <typename Dtype>
 void Net<Dtype>::server_predict(){
+	std::ifstream serverPredictionModel("server_prediction_model.txt", ios::in);
+	map<string, pair<float, float> > predictionParameter;
+	while(serverPredictionModel.good()){
+		string type, a, b;
+		serverPredictionModel >> type >> a >> b;
+		predictionParameter[type] = make_pair(strtof(a.c_str(),NULL), strtof(b.c_str(),NULL));
+	}
 	for(int i=0; i<layers_.size(); i++){
   		const LayerParameter& layer_param = layers_[i]->layer_param();
 		if(layer_param.name().find("split") != string::npos)continue;
 		float execution_time = 1.0;
-		//LOG(INFO) << i << " " << layer_param.name() << " : " << top_vecs[i][0]->shape_string();
 		string TypeName = layer_param.type();
 		int InputSize = 1;
 		for(int j=1; bottom_vecs_[i].size() && j<bottom_vecs_[i][0]->shape().size(); j++)InputSize *= bottom_vecs_[i][0]->shape(j);
-		if(TypeName == "Convolution"){
+		float a = predictionParameter[TypeName].first, b = predictionParameter[TypeName].second;
+		if(TypeName == "Input"){
+			execution_time = 0.001;
+		}
+		else if(TypeName == "Convolution"){
 			int Pad = 0, Stride = 1;
 			const ConvolutionParameter& conv_param = layer_param.convolution_param();
 			if(conv_param.pad_size() > 0)Pad = conv_param.pad(0);
 			if(conv_param.stride_size() > 0)Stride = conv_param.stride(0);
 			InputSize = ((bottom_vecs_[i][0]->shape(2) + 2 * Pad - conv_param.kernel_size(0)) / Stride) + 1;
-			execution_time = (8.914e-7) * (InputSize * InputSize * conv_param.num_output()
+			execution_time = a * (InputSize * InputSize * conv_param.num_output()
 					* bottom_vecs_[i][0]->shape(1) * conv_param.kernel_size(0)
-					* conv_param.kernel_size(0)) + 1.2969363802;
+					* conv_param.kernel_size(0)) + b;
 		}
 		else if(TypeName == "ReLU"){
-			execution_time = (8.7878e-6) * (InputSize) + 0.0040442887;
+			execution_time = a * (InputSize) + b;
 		}
 		else if(TypeName == "Pooling"){
 			int Pad = 0, Stride = 1;
@@ -391,25 +401,27 @@ void Net<Dtype>::server_predict(){
 			if(pool_param.has_pad())Pad = pool_param.pad();
 			if(pool_param.has_stride())Stride = pool_param.stride();
 			InputSize = ((bottom_vecs_[i][0]->shape(2) + 2 * Pad - pool_param.kernel_size()) / Stride) + 1;
-			execution_time = (4.33449e-5) * (InputSize * InputSize * bottom_vecs_[i][0]->shape(1)
-					* pool_param.kernel_size()) + 1.9214767188;
+			execution_time = a * (InputSize * InputSize * bottom_vecs_[i][0]->shape(1)
+					* pool_param.kernel_size()) + b;
 		}
 		else if(TypeName == "LRN"){
+			execution_time = a * (InputSize) + b;
 		}
 		else if(TypeName == "Concat"){
 			InputSize = (top_vecs_[i][0]->shape(1) * top_vecs_[i][0]->shape(2) * top_vecs_[i][0]->shape(3));
-			execution_time = (5.7274e-6) * (InputSize) - 0.0324475575;
+			execution_time = a * (InputSize) + b;
 		}
 		else if(TypeName == "Dropout"){
-			execution_time = (7.28374e-5) * (InputSize) + 0.0086956667;
+			if(bottom_vecs_[i][0]->shape().size() > 2)InputSize *= bottom_vecs_[i][0]->shape(2);
+			execution_time = a * (InputSize) + b;
 		}
 		else if(TypeName == "InnerProduct"){
 			const InnerProductParameter& innerproduct_param = layer_param.inner_product_param();
 			InputSize *= innerproduct_param.num_output();
-			execution_time = (2.2017e-6) * (InputSize) - 0.1782820183;
+			execution_time = a * (InputSize) + b;
 		}
 		else if(TypeName == "Softmax"){
-			execution_time = (1.753362e-4) * (InputSize) + 0.0126747067;
+			execution_time = a * (InputSize) + b;
 		}
 		layers_[i]->set_exec_time_s(execution_time);
 	}
@@ -422,7 +434,7 @@ void Net<Dtype>::client_predict(){
 	string line;
 	if(predictionModel.is_open()){
 		int i = -1;
-		while(getline(predictionModel, line) && i++ < (int)layers_.size()){
+		while(getline(predictionModel, line) && ++i < (int)layers_.size()){
 			layers_[i]->set_exec_time_c(atof(line.substr(line.rfind(' ')).c_str()));
 		}
 		predictionModel.close();

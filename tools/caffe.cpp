@@ -406,7 +406,7 @@ int time() {
   LOG(INFO) << "Average time per layer: ";
   
   // Open prediction model file
-  ofstream predictionModel("prediction_model.txt", ios::out);
+  ofstream predictionModel("prediction_model.txt", ios::out | ios::trunc);
 
   for (int i = 0; i < layers.size(); ++i) {
     const caffe::string& layername = layers[i]->layer_param().name();
