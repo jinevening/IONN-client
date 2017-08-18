@@ -715,8 +715,15 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     // cout << "Received " << valread << " bytes" << endl;
     BlobProto received_data;
     received_data.ParseFromArray(buff + 4, output_size);
-    // give input after receiving data
-    bottom_vecs_[resume_point + 1][0]->FromProto(received_data);
+
+    if (bottom_vecs_.size() > resume_point + 1) {
+      // give input after receiving data
+      bottom_vecs_[resume_point + 1][0]->FromProto(received_data);
+    }
+    else {
+      // this is the last layer
+      net_output_blobs_[0]->FromProto(received_data);
+    }
 
     // set next starting point
     start = resume_point + 1;
@@ -724,6 +731,12 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
   if (start < layers_.size()) {
     ForwardFromTo(start, layers_.size() - 1);
   }
+
+  boost::system::error_code ec;
+  s.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+
+  if (ec)
+    throw boost::system::system_error(ec); // Some other error.
 
   delete buff;
 }
