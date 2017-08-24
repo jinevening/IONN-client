@@ -238,12 +238,9 @@ class Net {
   static bool StateMeetsRule(const NetState& state, const NetStateRule& rule,
       const string& layer_name);
 
-  // Get prediction model from server
-  inline void get_prediction_model_from_server(map<string, pair<float, float> >& predictionParameter);
-
   // Prediction Model
   inline void server_predict();
-  inline void client_predict(const string& prediction_file = "");
+  inline void client_predict();
 
   // Invoked at specific points during an iteration
   class Callback {
