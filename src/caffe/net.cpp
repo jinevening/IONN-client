@@ -361,16 +361,49 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
   return true;
 }
 
+// Get prediction model from server
+template <typename Dtype>
+void Net<Dtype>::get_prediction_model_from_server(map<string, pair<float, float> >& predictionParameter){
+	try{
+		const char *host = "147.46.115.243";
+		const char *port = "9999";
+		std::cout << host << " " << port << std::endl;
+
+		boost::asio::io_service io_service;
+
+		tcp::socket s(io_service);
+		tcp::resolver resolver(io_service);
+		boost::asio::connect(s, resolver.resolve({host, port}));
+
+		char response[1024];
+		char tmp[4];
+		boost::asio::read(s, boost::asio::buffer(tmp, 4));
+		size_t length = 0;
+
+		for(int i=0; i<4; ++i){
+			length *= 128;
+			length += tmp[i];
+		}
+		boost::asio::read(s, boost::asio::buffer(response, length));
+
+		stringstream ss(response);
+		while(ss.good()){
+			string type, a, b;
+			ss >> type >> a >> b;
+			predictionParameter[type] = make_pair(strtof(a.c_str(),NULL), strtof(b.c_str(),NULL));
+		}
+	}
+	catch (std::exception& e){
+		std::cerr << "Exception: " << e.what() << std::endl;
+	}
+}
+
 // Prediction Model
 template <typename Dtype>
 void Net<Dtype>::server_predict(){
-	std::ifstream serverPredictionModel("server_prediction_model.txt", ios::in);
+	//std::ifstream serverPredictionModel("server_prediction_model.txt", ios::in);
 	map<string, pair<float, float> > predictionParameter;
-	while(serverPredictionModel.good()){
-		string type, a, b;
-		serverPredictionModel >> type >> a >> b;
-		predictionParameter[type] = make_pair(strtof(a.c_str(),NULL), strtof(b.c_str(),NULL));
-	}
+	get_prediction_model_from_server(predictionParameter);
 	for(int i=0; i<layers_.size(); i++){
   		const LayerParameter& layer_param = layers_[i]->layer_param();
 		if(layer_param.name().find("split") != string::npos)continue;
@@ -429,8 +462,8 @@ void Net<Dtype>::server_predict(){
 
 // Client side prediction model 
 template <typename Dtype>
-void Net<Dtype>::client_predict(){
-	std::ifstream predictionModel("prediction_model.txt", ios::in);
+void Net<Dtype>::client_predict(const string& prediction_file){
+	std::ifstream predictionModel(prediction_file.c_str(), ios::in);
 	string line;
 	if(predictionModel.is_open()){
 		int i = -1;
