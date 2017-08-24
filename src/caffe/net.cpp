@@ -260,6 +260,8 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   }
   ShareWeights();
   debug_info_ = param.debug_info();
+  server_predict();
+  client_predict();
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
 }
 
@@ -357,6 +359,79 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
     }
   }
   return true;
+}
+
+// Server side prediction model
+template <typename Dtype>
+bool Net<Dtype>::server_predict(const string& prediction_file){
+	map<string, pair<float, float> > predictionParameter;
+	predictionParameter["Input"] = make_pair(1, 1);
+	std::ifstream predictionModel(prediction_file.c_str(), ios::in);
+	if(predictionModel.is_open()){
+		while(predictionModel.good()){
+			string type, a, b;
+			predictionModel >> type >> a >> b;
+			predictionParameter[type] = make_pair(strtof(a.c_str(), NULL), strtof(b.c_str(), NULL));
+		}
+		predictionModel.close();
+	}
+	else{
+		return false;
+	}
+	for(int i=0; i<layers_.size(); ++i){
+		const LayerParameter& layer_param = layers_[i]->layer_param();
+		if(layer_param.name().find("split") != string::npos)continue;
+		float execution_time = 1.0;
+		string TypeName = layer_param.type();
+		long long InputSize = 1;
+		for(int j=1; j<top_vecs_[i][0]->shape().size(); ++j)InputSize *= top_vecs_[i][0]->shape(j);
+		float a = predictionParameter[TypeName].first, b = predictionParameter[TypeName].second;
+		if(a == 0 && b == 0){
+			std::cerr << "Unidentified layer type: " << TypeName << std::endl;
+			return false;
+		}
+		if(TypeName == "Convolution"){
+			const ConvolutionParameter& conv_param = layer_param.convolution_param();
+			InputSize /= top_vecs_[i][0]->shape(1);
+			InputSize = InputSize * conv_param.num_output()
+						* conv_param.kernel_size(0) * conv_param.kernel_size(0)
+						* bottom_vecs_[i][0]->shape(1);
+		}
+		else if(TypeName == "Pooling"){
+			const PoolingParameter& pool_param = layer_param.pooling_param();
+			InputSize = InputSize * pool_param.kernel_size() * pool_param.kernel_size();
+			if(pool_param.has_pad())InputSize *= pool_param.pad();
+		}
+		else if(TypeName == "InnerProduct"){
+			const InnerProductParameter& innerproduct_param = layer_param.inner_product_param();
+			InputSize *= innerproduct_param.num_output();
+		}
+		else if(TypeName == "Eltwise"){
+			InputSize *= top_vecs_[i][0]->shape(2);
+		}
+		if(TypeName == "Input"){
+			execution_time = 0.001;
+		}
+		else{
+			execution_time = a * InputSize + b;
+		}
+		layers_[i]->set_exec_time_s(execution_time);
+	}
+	return true;
+}
+
+// Client side prediction model
+template <typename Dtype>
+void Net<Dtype>::client_predict(const string& prediction_file){
+	std::ifstream predictionModel(prediction_file.c_str(), ios::in);
+	string line;
+	if(predictionModel.is_open()){
+		int i = -1;
+		while(getline(predictionModel, line) && ++i < (int)layers_.size()){
+			layers_[i]->set_exec_time_c(atof(line.substr(line.rfind(' ')).c_str()));
+		}
+		predictionModel.close();
+	}
 }
 
 // Helper for Net::Init: add a new top blob to the net.
