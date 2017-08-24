@@ -148,6 +148,11 @@ void Classifier::SetMean(const string& mean_file) {
 }
 
 std::vector<float> Classifier::Predict(const cv::Mat& img) {
+	/* Time check variables*/
+  double timechk;
+	struct timeval start;
+	struct timeval finish;
+
   Blob<float>* input_layer = net_->input_blobs()[0];
   input_layer->Reshape(1, num_channels_,
                        input_geometry_.height, input_geometry_.width);
@@ -159,7 +164,13 @@ std::vector<float> Classifier::Predict(const cv::Mat& img) {
 
   Preprocess(img, &input_channels);
 
+	gettimeofday(&start, NULL);
   net_->Forward();
+  gettimeofday(&finish, NULL);
+  timechk = (double)(finish.tv_sec) + (double)(finish.tv_usec) / 1000000.0 -
+            (double)(start.tv_sec) - (double)(start.tv_usec) / 1000000.0;
+  cout << "Local Forward time : " << timechk << " s" << endl;
+
 
   /* Copy the output layer to a std::vector */
   Blob<float>* output_layer = net_->output_blobs()[0];

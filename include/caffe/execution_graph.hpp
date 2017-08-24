@@ -71,11 +71,12 @@ class ExecutionGraph {
     ENERGY = 1
   };
 
-  explicit ExecutionGraph(Net<float>* net)
+  explicit ExecutionGraph(Net<float>* net, float network_speed)
     : transfer_watt(1.0),
       compute_watt(1.0),
       time_graph_(NULL),
       energy_graph_(NULL),
+      network_speed_(network_speed * 1024.0 * 1024.0 / 8000.0 ),  // network_speed Mbps
       net_(net) {
 //    net_ = net;
     // create simplified NN layers for execution graph
@@ -109,6 +110,7 @@ class ExecutionGraph {
   // adjacency list graph implementation
   list<pair<int, float> > * time_graph_;
   list<pair<int, float> > * energy_graph_;
+  float network_speed_;
   Net<float>* net_;
   vector<ExecutionGraphLayer*> graph_layers_;
   map<string, int> layer_names_index_;

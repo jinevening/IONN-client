@@ -5,9 +5,6 @@
 
 #define INF 9999999.0
 
-// network speed (30 Mbit/msec. 1000 for msec, 8 for bit)
-#define NETWORK_SPEED (30.0 * 1024.0 * 1024.0 / 8000.0)
-
 using namespace std;
 
 namespace caffe {
@@ -62,8 +59,6 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
     current_layer->output_feature_size = output_f_size;
 
     // update execution time
-    //current_layer->exec_time_c += 1.0;
-    //current_layer->exec_time_s += 1.0;
     current_layer->exec_time_c += layers[i]->get_exec_time_c();
     current_layer->exec_time_s += layers[i]->get_exec_time_s();
 
@@ -98,12 +93,11 @@ void ExecutionGraphLayer::printExecutionGraphLayer() {
 
 void ExecutionGraph::addEdge(list<pair<int, float> >* graph, int src, int dst, float weight) {
   graph[src].push_back(make_pair(dst,weight));
-  cout << "(" << src << ", " << dst << ", " << weight << ")" << endl;
+//  cout << "(" << src << ", " << dst << ", " << weight << ")" << endl;
 }
 
 void ExecutionGraph::createTimeExecutionGraph() {
   time_graph_ = new list<pair<int, float> >[(4 * graph_layers_.size()) + 2];   // +2 for input,output
-  float network_speed = NETWORK_SPEED;
 
   // edge from input
   addEdge(time_graph_, 0, 1, 0.0);
@@ -117,9 +111,9 @@ void ExecutionGraph::createTimeExecutionGraph() {
     float exec_time_s = graph_layers_[i]->exec_time_s;
 
     // set edges inside a layer
-    addEdge(time_graph_, idx, idx + 1, (static_cast<float>(model_size) + input_feature_size)/network_speed);
+    addEdge(time_graph_, idx, idx + 1, (static_cast<float>(model_size) + input_feature_size)/network_speed_);
     addEdge(time_graph_, idx + 1, idx + 2, exec_time_s);
-    addEdge(time_graph_, idx + 2, idx + 3, output_feature_size/network_speed);
+    addEdge(time_graph_, idx + 2, idx + 3, output_feature_size/network_speed_);
     addEdge(time_graph_, idx, idx + 3, exec_time_c);
 
     // set edges in-between layers
@@ -128,13 +122,12 @@ void ExecutionGraph::createTimeExecutionGraph() {
 
     // server route
     if (i > 0)
-      addEdge(time_graph_, idx - 2, idx + 1, static_cast<float>(model_size)/network_speed);
+      addEdge(time_graph_, idx - 2, idx + 1, static_cast<float>(model_size)/network_speed_);
   }
 }
 
 void ExecutionGraph::createEnergyExecutionGraph() {
   energy_graph_ = new list<pair<int, float> >[(3 * graph_layers_.size()) + 2];   // +2 for input,output
-  float network_speed = NETWORK_SPEED;
 
   // edge from input
   addEdge(energy_graph_, 0, 1, 0.0);
@@ -147,8 +140,8 @@ void ExecutionGraph::createEnergyExecutionGraph() {
     float exec_time_c = graph_layers_[i]->exec_time_c;
 
     // set edges inside a layer
-    addEdge(energy_graph_, idx, idx + 1, transfer_watt * ((static_cast<float>(model_size) + input_feature_size)/network_speed));
-    addEdge(energy_graph_, idx + 1, idx + 2, transfer_watt * (output_feature_size/network_speed));
+    addEdge(energy_graph_, idx, idx + 1, transfer_watt * ((static_cast<float>(model_size) + input_feature_size)/network_speed_));
+    addEdge(energy_graph_, idx + 1, idx + 2, transfer_watt * (output_feature_size/network_speed_));
     addEdge(energy_graph_, idx, idx + 2, compute_watt * exec_time_c);
 
     // set edges in-between layers
@@ -157,7 +150,7 @@ void ExecutionGraph::createEnergyExecutionGraph() {
 
     // server route
     if (i > 0)
-      addEdge(energy_graph_, idx - 2, idx + 1, transfer_watt * (static_cast<float>(model_size)/network_speed));
+      addEdge(energy_graph_, idx - 2, idx + 1, transfer_watt * (static_cast<float>(model_size)/network_speed_));
   }
 }
 
@@ -264,7 +257,6 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
       cout << "offload (" << offloading_point << ", " << resume_point << ") ";
       float c_time = 0.0;
       float s_time = 0.0;
-      float network_speed = NETWORK_SPEED;
       int s = (path[node]-1)/4;
       int e = (resume_node-1)/4;
       for (int idx = s; idx <= e; idx++) {
@@ -273,12 +265,12 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
         float input_feature_size = graph_layers_[idx]->input_feature_size;
         float output_feature_size = graph_layers_[idx]->output_feature_size;
         if (idx == s) {
-          s_time += input_feature_size/network_speed;
+          s_time += input_feature_size/network_speed_;
         }
         if (idx == e) {
-          s_time += output_feature_size/network_speed;
+          s_time += output_feature_size/network_speed_;
         }
-        s_time += static_cast<float>(model_size)/network_speed;
+        s_time += static_cast<float>(model_size)/network_speed_;
         s_time += graph_layers_[idx]->exec_time_s;
       }
       cout << "local time : " << c_time << ", offload time : " << s_time << endl;
