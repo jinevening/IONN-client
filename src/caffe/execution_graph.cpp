@@ -1,6 +1,7 @@
 
 
 #include <queue>
+#include <algorithm>
 #include "caffe/execution_graph.hpp"
 
 #define INF 9999999.0
@@ -9,62 +10,161 @@ using namespace std;
 
 namespace caffe {
 
+static vector<int> intersection(const vector<vector<int>* > *vecs) {
+	vector<int> last_intersection = *(vecs->at(0));
+	vector<int> curr_intersection;
+
+	for (size_t i = 1; i < vecs->size(); ++i) {
+		set_intersection(last_intersection.begin(), last_intersection.end(),
+			vecs->at(i)->begin(), vecs->at(i)->end(),
+			back_inserter(curr_intersection));
+		swap(last_intersection, curr_intersection);
+		curr_intersection.clear();
+	}
+	return last_intersection;
+}
+
+void ExecutionGraph::computeDominatorLayers() {
+  const vector<shared_ptr<Layer<float> > >& layers = net_->layers();
+  int num_layers = layers.size();
+  int output_layer = num_layers - 1;
+
+  // Set initial value
+  for (int i = 0; i < num_layers; i++) {
+    vector<int>* dominator = layers[i]->dominator();
+    if (i == 0)
+      dominator->push_back(0);
+    else {
+      for(int j = 0; j < num_layers; j++) {
+        dominator->push_back(j);
+      }
+    }
+  }
+
+  // Get dominators
+  bool changed;
+  do {
+    changed = false;
+    for (int i = 1; i < num_layers; i++) {
+      // Get intersection of parents' dom + current layer
+      int num_parents = layers[i]->layer_param().bottom_size();
+			vector<int> parents_layers;
+      for (int j = 0; j < num_parents; j++) {
+        string bottom_blob = layers[i]->layer_param().bottom(j);
+        if (bottom_blob.find("split") != string::npos) {
+          // This is for special characteristic of 'split' layer
+          // hard coding.. but simple
+          bottom_blob = bottom_blob.substr(0, bottom_blob.length() - 2);
+        }
+        int layer_id = net_->layer_id_by_name(bottom_blob);
+        CHECK_GE(layer_id, 0);
+        parents_layers.push_back(layer_id);
+      }
+      vector<vector<int>* > parents_doms;
+      for (int j = 0; j < parents_layers.size(); j++) {
+				parents_doms.push_back(layers[parents_layers[j]]->dominator());
+			}
+			vector<int> result = intersection(&parents_doms);
+    	result.push_back(i);
+
+			// Compare the result with the original dom list
+			// If changed, update dom list
+			vector<int> v;
+			vector<int>* curr_dom = layers[i]->dominator();
+			set_difference(curr_dom->begin(), curr_dom->end(), result.begin(), result.end(), inserter(v, v.begin()));
+			if (v.size() > 0) {
+				changed = true;
+				curr_dom->assign(result.begin(), result.end());
+			}
+		}
+  } while (changed);
+
+	// Print dominators of output layer
+	cout << "Dominators of output layer:";
+	vector<int>* output_dom = layers[output_layer]->dominator();
+  // remove output layer
+  output_dom->pop_back();
+
+  // i = 1 -> remove input layer
+  for (int i = 1; i < output_dom->size(); i++) {
+    if (strcmp(layers[output_dom->at(i)]->type(), "Split") != 0) {
+      dominators_.push_back(output_dom->at(i));
+      cout << " " << output_dom->at(i);
+	  }
+  }
+	cout << endl;
+
+	cout << "# of Dominators: " << dominators_.size() << endl;
+
+  // Clear dominators
+  // (This should be chagned.
+  // we can allocate dominators in this function as local variables
+  // so that they can be cleared naturally)
+  for (int i = 0; i < num_layers; i++) {
+    layers[i]->dominator()->clear();
+  }
+}
+
 void ExecutionGraph::setUpExecutionGraphLayers() {
   const vector<shared_ptr<Layer<float> > >& layers = net_->layers();
   const vector<string>& layer_names = net_->layer_names();
   int num_layers = layers.size();
 
-  int layer_id = 0;
   ExecutionGraphLayer* current_layer = NULL;
-  for (int i = 0; i < num_layers; i++) {
-    const string& layer_full_name = layer_names[i];
-    string layer_name = layer_full_name.substr(0, layer_full_name.find("/"));
 
+  // ID of next dominator
+  int next_dom_idx = dominators_.size() - 1;
+  int next_dom = dominators_[next_dom_idx];
+
+  // Create layers from output to input layer
+  for (int i = num_layers - 2; i > 0 ; i--) {
     // Skip split layers
     // Because split layers do not have useful information but give wrong output param numbers
-    if (layer_full_name.find("split") != string::npos) {
+    if (strcmp(layers[i]->type(), "Split") == 0) {
       continue;
     }
 
-    if (layer_names_index_.find(layer_name) == layer_names_index_.end()) {
-      // create a new layer and set it as the current layer
-      current_layer = new ExecutionGraphLayer(layer_name);
-      graph_layers_.push_back(current_layer);
-      layer_names_index_[layer_name] = layer_id++;
-      current_layer->start_layer_id = i;
+    if (i == next_dom) {
+      const string& layer_name = layer_names[i];
 
-      if (i == 0) {
-        // set input feature size of current layer
-        // (we assume there is only one input)
-        current_layer->input_feature_size = net_->input_blobs()[0]->count(1) * sizeof(float);
+      // Create a new execution graph layer
+      current_layer = new ExecutionGraphLayer(layer_name);
+      current_layer->end_layer_id = i;
+
+      // set output feature size of current layer
+      for (int j = 0; j < net_->top_vecs()[i].size(); j++) {
+        current_layer->output_feature_size += net_->top_vecs()[i][j]->count(1) * sizeof(float);
       }
-      else {
-        // set input feature size of current layer
-        for (int j = 0; j < net_->bottom_vecs()[i].size(); j++) {
-          current_layer->input_feature_size += net_->bottom_vecs()[i][j]->count(1) * sizeof(float);
-        }
-      }
+
+			// push front
+		  vector<ExecutionGraphLayer*>::iterator it = graph_layers_.begin();
+			it = graph_layers_.insert (it , current_layer);
+
+      // update next_dom (take care of out-of-range case)
+      if (--next_dom_idx >= 0)
+        next_dom = dominators_[next_dom_idx];
     }
+
+    current_layer->start_layer_id = i;
 
     // update model size
     for (int j = 0; j < layers[i]->blobs().size(); j++) {
       current_layer->model_size += layers[i]->blobs()[j]->count() * sizeof(float);
     }
 
-    // update output feature size
-    int output_f_size = 0;
-    for (int j = 0; j < net_->top_vecs()[i].size(); j++) {
-      output_f_size += net_->top_vecs()[i][j]->count(1) * sizeof(float);
+    // update input feature size
+    int input_f_size = 0;
+    for (int j = 0; j < net_->bottom_vecs()[i].size(); j++) {
+      input_f_size += net_->bottom_vecs()[i][j]->count(1) * sizeof(float);
     }
-    current_layer->output_feature_size = output_f_size;
+    current_layer->input_feature_size = input_f_size;
 
     // update execution time
     current_layer->exec_time_c += layers[i]->get_exec_time_c();
     current_layer->exec_time_s += layers[i]->get_exec_time_s();
-
-    current_layer->end_layer_id = i;
   }
 }
+
 void ExecutionGraph::printLayers() {
   cout << "There are " << graph_layers_.size()  << " layers" << endl;
   for (int i = 0; i < graph_layers_.size(); i++) {

@@ -24,7 +24,7 @@ namespace caffe {
  */
 class ExecutionGraphLayer {
  public:
-  ExecutionGraphLayer(string name_str)
+  ExecutionGraphLayer(const string& name_str)
    : name(name_str),
      input_feature_size(0),
      output_feature_size(0),
@@ -78,7 +78,10 @@ class ExecutionGraph {
       energy_graph_(NULL),
       network_speed_(network_speed * 1024.0 * 1024.0 / 8000.0 ),  // network_speed Mbps
       net_(net) {
-//    net_ = net;
+
+    // compute dominators of each layer
+    computeDominatorLayers();
+
     // create simplified NN layers for execution graph
     // from real caffe NN layers
     setUpExecutionGraphLayers();
@@ -102,7 +105,10 @@ class ExecutionGraph {
   float compute_watt;
 
  private:
+  // compute dominators to handle multiple path problem
+  void computeDominatorLayers();
   void setUpExecutionGraphLayers();
+  vector<int> dominators_;
 
   void addEdge(list<pair<int, float> > * graph, int src, int dst, float weight);
   void shortestPath(OptTarget opt_target, list<pair<int, int> >* result);
@@ -113,7 +119,6 @@ class ExecutionGraph {
   float network_speed_;
   Net<float>* net_;
   vector<ExecutionGraphLayer*> graph_layers_;
-  map<string, int> layer_names_index_;
 };
 
 }  // namespace caffe

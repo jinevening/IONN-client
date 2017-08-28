@@ -303,6 +303,9 @@ class Layer {
   inline void set_exec_time_s(float s){
 	exec_time_s_ = s;
   }
+  inline vector<int>* dominator() {
+    return &dominator_;
+  }
 
  protected:
   /** The protobuf that stores the layer parameters */
@@ -321,6 +324,9 @@ class Layer {
   /** Predicted execution time */
   float exec_time_c_;
   float exec_time_s_;
+
+  /** Dominator */
+  vector<int> dominator_;
 
   /** @brief Using the CPU device, compute the layer output. */
   virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,

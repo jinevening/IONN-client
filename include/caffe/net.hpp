@@ -224,6 +224,7 @@ class Net {
   const shared_ptr<Blob<Dtype> > blob_by_name(const string& blob_name) const;
   bool has_layer(const string& layer_name) const;
   const shared_ptr<Layer<Dtype> > layer_by_name(const string& layer_name) const;
+  int layer_id_by_name(const string& layer_name) const;
 
   void set_debug_info(const bool value) { debug_info_ = value; }
 
@@ -239,8 +240,8 @@ class Net {
       const string& layer_name);
 
   // Prediction Model
-  inline bool server_predict(const string& prediction_file = "");
-  inline void client_predict(const string& prediction_file = "");
+  bool server_predict(const string& prediction_file = "");
+  void client_predict(const string& prediction_file = "");
 
   // Invoked at specific points during an iteration
   class Callback {

@@ -1046,7 +1046,7 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff, int start, int en
   LayerParameter* layer_param;
 
   // If the first layer of the offloaded partition is not the input layer,
-  // Then we add dummy input layer and set the next layer's bottom as "data"
+  // then we add dummy input layer and set the next layer's bottom as "data"
   // assumption : the first layer of offloaded partition has only one input
   if (start != 0) {
     layer_param = param->add_layer();
@@ -1065,9 +1065,16 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff, int start, int en
     }
     layer_param->set_allocated_input_param(input_param);
 
-    LayerParameter& tmp = const_cast<LayerParameter&>(layers_[start]->layer_param());
-    string tmp_bottom = tmp.bottom(0);
-    tmp.set_bottom(0, "data");
+    // change original bottom name to 'data'
+    string original_name = layers_[start]->layer_param().bottom(0);
+    cout << "Original bottom name: " << original_name << endl;
+    for (int i = start; i <= end; i++) {
+      LayerParameter& tmp = const_cast<LayerParameter&>(layers_[i]->layer_param());
+      for (int j = 0; j < bottom_vecs_[i].size(); j++) {
+        if (tmp.bottom(j).compare(original_name) == 0)
+          tmp.set_bottom(j, "data");
+      }
+    }
 
     // Serialize layers
     cout << "Serializing " << (end - start + 1) << " layers" << endl;
@@ -1077,7 +1084,13 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff, int start, int en
     }
 
     // Recover the saved bottom
-    tmp.set_bottom(0, tmp_bottom);
+    for (int i = start; i <= end; i++) {
+      LayerParameter& tmp = const_cast<LayerParameter&>(layers_[i]->layer_param());
+      for (int j = 0; j < bottom_vecs_[i].size(); j++) {
+        if (strcmp(tmp.bottom(j).c_str(), "data") == 0)
+          tmp.set_bottom(j, original_name);
+      }
+    }
   }
   else {
     // Serialize layers
@@ -1217,6 +1230,19 @@ const shared_ptr<Layer<Dtype> > Net<Dtype>::layer_by_name(
     LOG(WARNING) << "Unknown layer name " << layer_name;
   }
   return layer_ptr;
+}
+
+template <typename Dtype>
+int Net<Dtype>::layer_id_by_name(const string& layer_name) const {
+  if (has_layer(layer_name)) {
+    return layer_names_index_.find(layer_name)->second;
+  } else {
+    LOG(WARNING) << "Unknown layer name " << layer_name;
+    return -1;
+  }
+  // unreachable
+  CHECK(false);
+  return -1;
 }
 
 INSTANTIATE_CLASS(Net);
