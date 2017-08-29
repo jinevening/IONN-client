@@ -626,7 +626,12 @@ Dtype Net<Dtype>::ForwardTo(int end) {
 
 template <typename Dtype>
 void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
+	/* Time check variables*/
+  double timechk;
+	struct timeval start_t;
+	struct timeval finish_t;
 
+  /* Connect to the server */
   boost::asio::io_service io_service;
   tcp::socket s(io_service);
   tcp::resolver resolver(io_service);
@@ -634,12 +639,13 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
   tcp::resolver::iterator iter = resolver.resolve(query);
   boost::asio::connect(s, iter);
 
-  // struct sockaddr_in server_addr;
+  /* Buffer for data transmission */
   unsigned char* buff = new unsigned char[BUFF_SIZE];
   memset(buff, 0, sizeof(BUFF_SIZE));
 
   int start = 0;
   list< pair<int, int> >::iterator i;
+  /* Forward execution according to the given offloading plan */
   for (i = plan->begin(); i != plan->end(); ++i) {
     int offloading_point = (*i).first;
     int resume_point = (*i).second;
@@ -650,14 +656,16 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     if (offloading_point > 1)
       ForwardFromTo(start, offloading_point - 1);
 
-    // Serialize partial model blobs
+    gettimeofday(&start_t, NULL);
+
+    /* Serialize partial model blobs */
     NetParameter net_param;
     ToProto(&net_param, false, offloading_point, resume_point);
     model_size = net_param.ByteSize();
     net_param.SerializeWithCachedSizesToArray(buff + 8);
     cout << "Partial model blobs size : " << model_size << " bytes" << endl;
 
-    // Serialize feature data
+    /* Serialize feature data */
     BlobProto feature_proto;
     if (offloading_point == 0) {
       net_input_blobs_[0]->ToProto(&feature_proto, false);
@@ -674,14 +682,18 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     memcpy(buff, &total_size, 4);
     memcpy(buff + 4, &model_size, 4);
 
-    // Send offloading request to the server
-    // write(client_socket, buff, 8 + total_size);
+    gettimeofday(&finish_t, NULL);
+    timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
+              (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
+    cout << "Time for serializing model + feature : " << timechk << " s" << endl;
+
+    /* Send offloading request to the server */
     boost::asio::write(s, boost::asio::buffer(buff, 8 + total_size));
 
     int output_size = 0;	// output size
     unsigned char* buffer_ptr = buff;
     try {
-      // Receive Data
+      /* Receive data */
       do {
         boost::system::error_code error;
         size_t length = s.read_some(boost::asio::buffer(buffer_ptr, BUFF_SIZE), error);
@@ -710,21 +722,24 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     received_data.ParseFromArray(buff + 4, output_size);
 
     if (bottom_vecs_.size() > resume_point + 1) {
-      // give input after receiving data
+      /* Give input after receiving data */
       bottom_vecs_[resume_point + 1][0]->FromProto(received_data);
     }
     else {
-      // this is the last layer
+      /* This is the last layer */
       net_output_blobs_[0]->FromProto(received_data);
     }
 
-    // set next starting point
+    /* Set next starting point */
     start = resume_point + 1;
   }
+
+  /* Execute the rest of DNN (if there is any) */
   if (start < layers_.size()) {
     ForwardFromTo(start, layers_.size() - 1);
   }
 
+  /* Shutdown socket */
   boost::system::error_code ec;
   s.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
 

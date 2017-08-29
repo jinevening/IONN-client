@@ -57,7 +57,11 @@ void ExecutionGraph::computeDominatorLayers() {
           bottom_blob = bottom_blob.substr(0, bottom_blob.length() - 2);
         }
         int layer_id = net_->layer_id_by_name(bottom_blob);
-        CHECK_GE(layer_id, 0);
+        if (layer_id == -1 && bottom_blob.find("data") != string::npos) {
+          // This is for special characteristic of 'data' layer
+					layer_id = 0;
+				}
+				CHECK_GE(layer_id, 0);
         parents_layers.push_back(layer_id);
       }
       vector<vector<int>* > parents_doms;
@@ -226,6 +230,37 @@ void ExecutionGraph::createTimeExecutionGraph() {
   }
 }
 
+// Execution graph which assumes the whole DNN model is already transmitted to the server
+// So it does not consider model transmission time
+void ExecutionGraph::createStableTimeExecutionGraph() {
+  stable_time_graph_ = new list<pair<int, float> >[(4 * graph_layers_.size()) + 2];   // +2 for input,output
+
+  // edge from input
+  addEdge(stable_time_graph_, 0, 1, 0.0);
+
+  for (int i = 0; i < graph_layers_.size(); i++) {
+    int idx = (4 * i) + 1;
+    float input_feature_size = graph_layers_[i]->input_feature_size;
+    float output_feature_size = graph_layers_[i]->output_feature_size;
+    float exec_time_c = graph_layers_[i]->exec_time_c;
+    float exec_time_s = graph_layers_[i]->exec_time_s;
+
+    // set edges inside a layer
+    addEdge(stable_time_graph_, idx, idx + 1, input_feature_size/network_speed_);
+    addEdge(stable_time_graph_, idx + 1, idx + 2, exec_time_s);
+    addEdge(stable_time_graph_, idx + 2, idx + 3, output_feature_size/network_speed_);
+    addEdge(stable_time_graph_, idx, idx + 3, exec_time_c);
+
+    // set edges in-between layers
+    // client route
+    addEdge(stable_time_graph_, idx + 3, idx + 4, 0.0);
+
+    // server route
+    if (i > 0)
+      addEdge(stable_time_graph_, idx - 2, idx + 1, 0.0);
+  }
+}
+
 void ExecutionGraph::createEnergyExecutionGraph() {
   energy_graph_ = new list<pair<int, float> >[(3 * graph_layers_.size()) + 2];   // +2 for input,output
 
@@ -254,42 +289,98 @@ void ExecutionGraph::createEnergyExecutionGraph() {
   }
 }
 
+void ExecutionGraph::createStableEnergyExecutionGraph() {
+  stable_energy_graph_ = new list<pair<int, float> >[(3 * graph_layers_.size()) + 2];   // +2 for input,output
+
+  // edge from input
+  addEdge(stable_energy_graph_, 0, 1, 0.0);
+
+  for (int i = 0; i < graph_layers_.size(); i++) {
+    int idx = (3 * i) + 1;
+    float input_feature_size = graph_layers_[i]->input_feature_size;
+    float output_feature_size = graph_layers_[i]->output_feature_size;
+    float exec_time_c = graph_layers_[i]->exec_time_c;
+
+    // set edges inside a layer
+    addEdge(stable_energy_graph_, idx, idx + 1, transfer_watt * (input_feature_size/network_speed_));
+    addEdge(stable_energy_graph_, idx + 1, idx + 2, transfer_watt * (output_feature_size/network_speed_));
+    addEdge(stable_energy_graph_, idx, idx + 2, compute_watt * exec_time_c);
+
+    // set edges in-between layers
+    // client route
+    addEdge(stable_energy_graph_, idx + 2, idx + 3, 0.0);
+
+    // server route
+    if (i > 0)
+      addEdge(stable_energy_graph_, idx - 2, idx + 1, 0.0);
+  }
+}
+
 void ExecutionGraph::getBestPathForTime(list<pair<int, int> >* result) {
   shortestPath(TIME, result);
+}
+
+void ExecutionGraph::getBestPathForStableTime(list<pair<int, int> >* result) {
+  shortestPath(STABLE_TIME, result);
 }
 
 void ExecutionGraph::getBestPathForEnergy(list<pair<int, int> >* result) {
   shortestPath(ENERGY, result);
 }
 
+void ExecutionGraph::getBestPathForStableEnergy(list<pair<int, int> >* result) {
+  shortestPath(STABLE_ENERGY, result);
+}
+
 typedef pair<float, int> fiPair;
 
 static bool isServerNode(ExecutionGraph::OptTarget opt_target, int id) {
-  if (opt_target == ExecutionGraph::TIME) {
-    int offset = (id - 1) % 4;
-    return (offset == 1) || (offset == 2);
-  }
-  else if (opt_target == ExecutionGraph::ENERGY) {
-    int offset = (id - 1) % 3;
-    return (offset == 1);
-  }
-  // unreachable
-  CHECK(false);
-  return false;
+	bool result;
+	int offset;
+	switch(opt_target) {
+		case ExecutionGraph::TIME:
+		case ExecutionGraph::STABLE_TIME:
+			offset = (id - 1) % 4;
+			result = (offset == 1) || (offset == 2);
+			break;
+		case ExecutionGraph::ENERGY:
+		case ExecutionGraph::STABLE_ENERGY:
+			offset = (id - 1) % 3;
+			result = (offset == 1);
+			break;
+		default:
+			// unreachable
+			CHECK(false);
+	}
+	return result;
 }
 
 void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* result) {
 
   list<pair<int, float> >* graph = NULL;
-  int V = 0;
-  if (opt_target == TIME) {
-    graph = time_graph_;
-    V = (4 * graph_layers_.size()) + 2;
-  }
-  else if (opt_target == ENERGY) {
-    graph = energy_graph_;
-    V = (3 * graph_layers_.size()) + 2;
-  }
+  int V = 0;	// # of nodes
+
+	switch(opt_target) {
+		case TIME:
+			graph = time_graph_;
+			V = (4 * graph_layers_.size()) + 2;
+			break;
+		case ENERGY:
+			graph = energy_graph_;
+			V = (3 * graph_layers_.size()) + 2;
+			break;
+		case STABLE_TIME:
+			graph = stable_time_graph_;
+			V = (4 * graph_layers_.size()) + 2;
+			break;
+		case STABLE_ENERGY:
+			graph = stable_energy_graph_;
+			V = (3 * graph_layers_.size()) + 2;
+			break;
+		default:
+			// unreachable
+			CHECK(false);
+	}
 
   int src = 0;
 
@@ -322,7 +413,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
 		for (i = graph[u].begin(); i != graph[u].end(); ++i) {
 			// Get vertex label and weight of current adjacent of u
 			int v = (*i).first;
-			int weight = (*i).second;
+			float weight = (*i).second;
 
 			//  If there is shorted path to v through u.
 			if (dist[v] > dist[u] + weight) {
@@ -347,9 +438,12 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
       resume_node = node;
     }
     else if (isServerNode(opt_target, node) && !isServerNode(opt_target, path[node])) {
+
+			int nodes_per_layer = (opt_target == TIME || opt_target == STABLE_TIME) ? 4 : 3;
+
       // get index of real caffe layers
-      int offloading_point = graph_layers_[(path[node] - 1)/4]->start_layer_id;
-      int resume_point = graph_layers_[(resume_node - 1)/4]->end_layer_id;
+      int offloading_point = graph_layers_[(path[node] - 1)/nodes_per_layer]->start_layer_id;
+      int resume_point = graph_layers_[(resume_node - 1)/nodes_per_layer]->end_layer_id;
 
       result->push_front(make_pair(offloading_point, resume_point));
 
