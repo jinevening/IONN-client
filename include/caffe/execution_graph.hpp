@@ -32,7 +32,8 @@ class ExecutionGraphLayer {
      exec_time_c(0.0),
      exec_time_s(0.0),
      input_s(0.0),
-     output_s(0.0)
+     output_s(0.0),
+	 loading_time_s(0.0)
     {}
 
   void printExecutionGraphLayer();
@@ -58,6 +59,9 @@ class ExecutionGraphLayer {
   // ID mapping with real caffe layers
   int start_layer_id;
   int end_layer_id;
+
+  // server-side loading time
+  float loading_time_s;
 };
 
 /**

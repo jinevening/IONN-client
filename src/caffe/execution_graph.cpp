@@ -166,6 +166,7 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
     // update execution time
     current_layer->exec_time_c += layers[i]->get_exec_time_c();
     current_layer->exec_time_s += layers[i]->get_exec_time_s();
+	current_layer->loading_time_s = 1.707e-7 * current_layer->model_size + 0.0011725313;
   }
 }
 
@@ -192,6 +193,7 @@ void ExecutionGraphLayer::printExecutionGraphLayer() {
   << " model_size: " << model_size
   << " exec_time_c: " << exec_time_c
   << " exec_time_s: " << exec_time_s
+  << " loading_time_s: " << loading_time_s
   << endl;
 }
 
