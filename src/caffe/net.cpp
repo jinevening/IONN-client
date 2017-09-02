@@ -649,6 +649,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
   for (i = plan->begin(); i != plan->end(); ++i) {
     int offloading_point = (*i).first;
     int resume_point = (*i).second;
+    int prototxt_size = 0;
     int model_size = 0;
     int feature_size = 0;
     int total_size = 0;
@@ -658,11 +659,18 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 
     gettimeofday(&start_t, NULL);
 
+    /* Serialize prototxt */
+    NetParameter prototxt_param;
+    ToProtoNoBlob(&prototxt_param, false, offloading_point, resume_point);
+    prototxt_size = prototxt_param.ByteSize();
+    prototxt_param.SerializeWithCachedSizesToArray(buff + 12);
+    cout << "prototxt size : " << prototxt_size << " bytes" << endl;
+
     /* Serialize partial model blobs */
     NetParameter net_param;
     ToProto(&net_param, false, offloading_point, resume_point);
     model_size = net_param.ByteSize();
-    net_param.SerializeWithCachedSizesToArray(buff + 8);
+    net_param.SerializeWithCachedSizesToArray(buff + 12 + prototxt_size);
     cout << "Partial model blobs size : " << model_size << " bytes" << endl;
 
     /* Serialize feature data */
@@ -674,13 +682,14 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
       bottom_vecs_[offloading_point][0]->ToProto(&feature_proto, false);
     }
     feature_size = feature_proto.ByteSize();
-    feature_proto.SerializeWithCachedSizesToArray(buff + model_size + 8);
+    feature_proto.SerializeWithCachedSizesToArray(buff + 12 + prototxt_size + model_size);
     cout << "Feature blob size : " << feature_size << " bytes" << endl;
 
-    total_size = model_size + feature_size;
+    total_size = prototxt_size + model_size + feature_size;
 
     memcpy(buff, &total_size, 4);
-    memcpy(buff + 4, &model_size, 4);
+    memcpy(buff + 4, &prototxt_size, 4);
+    memcpy(buff + 8, &model_size, 4);
 
     gettimeofday(&finish_t, NULL);
     timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
@@ -688,7 +697,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     cout << "Time for serializing model + feature : " << timechk << " s" << endl;
 
     /* Send offloading request to the server */
-    boost::asio::write(s, boost::asio::buffer(buff, 8 + total_size));
+    boost::asio::write(s, boost::asio::buffer(buff, 12 + total_size));
 
     int output_size = 0;	// output size
     unsigned char* buffer_ptr = buff;
@@ -1051,6 +1060,68 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff) const {
   for (int i = 0; i < layers_.size(); ++i) {
     LayerParameter* layer_param = param->add_layer();
     layers_[i]->ToProto(layer_param, write_diff);
+  }
+}
+template <typename Dtype>
+void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end) const {
+  param->Clear();
+  param->set_name(name_);
+  LayerParameter* layer_param;
+
+  // If the first layer of the offloaded partition is not the input layer,
+  // then we add dummy input layer and set the next layer's bottom as "data"
+  // assumption : the first layer of offloaded partition has only one input
+  if (start != 0) {
+    layer_param = param->add_layer();
+    // Add a dummy input layer
+    layer_param->set_name("data");
+    layer_param->set_type("Input");
+    layer_param->add_top();
+    layer_param->set_top(0, "data");
+    InputParameter* input_param = new InputParameter();
+    input_param->add_shape();
+    for (int i = 0; i < bottom_vecs_[start].size(); i++) {
+      // cout << "# of input (must be 1): " << bottom_vecs_[start].size() << endl;
+      for (int j = 0; j < bottom_vecs_[start][i]->num_axes(); j++) {
+        input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(j));
+      }
+    }
+    layer_param->set_allocated_input_param(input_param);
+
+    // change original bottom name to 'data'
+    string original_name = layers_[start]->layer_param().bottom(0);
+    cout << "Original bottom name: " << original_name << endl;
+    for (int i = start; i <= end; i++) {
+      LayerParameter& tmp = const_cast<LayerParameter&>(layers_[i]->layer_param());
+      for (int j = 0; j < bottom_vecs_[i].size(); j++) {
+        if (tmp.bottom(j).compare(original_name) == 0)
+          tmp.set_bottom(j, "data");
+      }
+    }
+
+    // Serialize layers
+    cout << "Serializing " << (end - start + 1) << " layers" << endl;
+    for (int i = start; i <= end; ++i) {
+      layer_param = param->add_layer();
+      layers_[i]->ToProtoNoBlob(layer_param, write_diff);
+    }
+
+    // Recover the saved bottom
+    for (int i = start; i <= end; i++) {
+      LayerParameter& tmp = const_cast<LayerParameter&>(layers_[i]->layer_param());
+      for (int j = 0; j < bottom_vecs_[i].size(); j++) {
+        if (strcmp(tmp.bottom(j).c_str(), "data") == 0)
+          tmp.set_bottom(j, original_name);
+      }
+    }
+  }
+  else {
+    // Serialize layers
+    cout << "Serializing " << (end - start + 1) << " layers" << endl;
+    for (int i = start; i <= end; ++i) {
+      layer_param = param->add_layer();
+      layers_[i]->ToProtoNoBlob(layer_param, write_diff);
+    }
   }
 }
 
