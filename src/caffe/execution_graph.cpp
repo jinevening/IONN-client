@@ -166,7 +166,14 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
     // update execution time
     current_layer->exec_time_c += layers[i]->get_exec_time_c();
     current_layer->exec_time_s += layers[i]->get_exec_time_s();
-	current_layer->loading_time_s = 1.707e-7 * current_layer->model_size + 0.0011725313;
+
+	// prototxt size
+	NetParameter layer_prototxt_param;
+	net_->ToProtoNoBlob(&layer_prototxt_param, false, current_layer->start_layer_id, current_layer->end_layer_id);
+	current_layer->prototxt_size = layer_prototxt_param.ByteSize();
+
+	// server-side loading time
+	current_layer->loading_time_s = 2.6357798e-3 * current_layer->prototxt_size + 10.8014505382;
   }
 }
 
@@ -193,6 +200,7 @@ void ExecutionGraphLayer::printExecutionGraphLayer() {
   << " model_size: " << model_size
   << " exec_time_c: " << exec_time_c
   << " exec_time_s: " << exec_time_s
+  << " prototxt_size: " << prototxt_size
   << " loading_time_s: " << loading_time_s
   << endl;
 }

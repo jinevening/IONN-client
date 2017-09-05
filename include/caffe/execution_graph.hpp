@@ -33,6 +33,7 @@ class ExecutionGraphLayer {
      exec_time_s(0.0),
      input_s(0.0),
      output_s(0.0),
+	 prototxt_size(0),
 	 loading_time_s(0.0)
     {}
 
@@ -59,6 +60,9 @@ class ExecutionGraphLayer {
   // ID mapping with real caffe layers
   int start_layer_id;
   int end_layer_id;
+
+  // prototxt size of this layer (data to be transmitted)
+  int prototxt_size;
 
   // server-side loading time
   float loading_time_s;
