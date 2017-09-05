@@ -76,9 +76,7 @@ class ExecutionGraph {
  public:
   enum OptTarget {
     TIME = 0,
-    ENERGY = 1,
-		STABLE_TIME = 2,
-		STABLE_ENERGY = 3
+    ENERGY = 1
   };
 
   explicit ExecutionGraph(Net<float>* net, float network_speed)
@@ -105,14 +103,15 @@ class ExecutionGraph {
   // print best path for time/energy
   void getBestPathForTime(list<pair<int, int> >* result);
   void getBestPathForEnergy(list<pair<int, int> >* result);
-  void getBestPathForStableTime(list<pair<int, int> >* result);
-  void getBestPathForStableEnergy(list<pair<int, int> >* result);
+
+  // update edge weights of NN execution graph
+  // model transfer cost will decrease by k
+  void updateTimeExecutionGraphWeight(float k);
+  void updateEnergyExecutionGraphWeight(float k);
 
   // create NN execution graph for time/energy optimization
   void createTimeExecutionGraph();
   void createEnergyExecutionGraph();
-	void createStableTimeExecutionGraph();
-  void createStableEnergyExecutionGraph();
 
   // average watt for transfer/compute
   float transfer_watt;
@@ -130,8 +129,6 @@ class ExecutionGraph {
   // adjacency list graph implementation
   list<pair<int, float> > * time_graph_;					// execution graph for migrating
   list<pair<int, float> > * energy_graph_;					// execution graph for migrating
-  list<pair<int, float> > * stable_time_graph_;		// execution graph for steady-state
-  list<pair<int, float> > * stable_energy_graph_;		// execution graph for steady-state
   float network_speed_;
   Net<float>* net_;
   vector<ExecutionGraphLayer*> graph_layers_;

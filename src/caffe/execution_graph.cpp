@@ -223,6 +223,7 @@ void ExecutionGraph::createTimeExecutionGraph() {
     int model_size = graph_layers_[i]->model_size;
     float exec_time_c = graph_layers_[i]->exec_time_c;
     float exec_time_s = graph_layers_[i]->exec_time_s;
+    float loading_time_s = graph_layers_[i]->loading_time_s;
 
     // set edges inside a layer
     addEdge(time_graph_, idx, idx + 1, (static_cast<float>(model_size) + input_feature_size)/network_speed_);
@@ -235,39 +236,62 @@ void ExecutionGraph::createTimeExecutionGraph() {
     addEdge(time_graph_, idx + 3, idx + 4, 0.0);
 
     // server route
-    if (i > 0)
+    if (i > 0){
       addEdge(time_graph_, idx - 2, idx + 1, static_cast<float>(model_size)/network_speed_);
+    }
   }
 }
 
-// Execution graph which assumes the whole DNN model is already transmitted to the server
-// So it does not consider model transmission time
-void ExecutionGraph::createStableTimeExecutionGraph() {
-  stable_time_graph_ = new list<pair<int, float> >[(4 * graph_layers_.size()) + 2];   // +2 for input,output
-
-  // edge from input
-  addEdge(stable_time_graph_, 0, 1, 0.0);
-
+// model transfer cost is updated to (1 - k) * model_transfer_cost
+// ex1 : k = 0, model transfer cost is the same with first offloading
+// ex2 : k = 1, model transfer cost will be 0
+void ExecutionGraph::updateTimeExecutionGraphWeight(float k) {
   for (int i = 0; i < graph_layers_.size(); i++) {
     int idx = (4 * i) + 1;
     float input_feature_size = graph_layers_[i]->input_feature_size;
-    float output_feature_size = graph_layers_[i]->output_feature_size;
-    float exec_time_c = graph_layers_[i]->exec_time_c;
-    float exec_time_s = graph_layers_[i]->exec_time_s;
+    int model_size = graph_layers_[i]->model_size;
 
-    // set edges inside a layer
-    addEdge(stable_time_graph_, idx, idx + 1, input_feature_size/network_speed_);
-    addEdge(stable_time_graph_, idx + 1, idx + 2, exec_time_s);
-    addEdge(stable_time_graph_, idx + 2, idx + 3, output_feature_size/network_speed_);
-    addEdge(stable_time_graph_, idx, idx + 3, exec_time_c);
+    // update edege weights for transmitting a DNN model
+		list< pair<int, float> >::iterator j;
+		for (j = time_graph_[idx].begin(); j != time_graph_[idx].end(); ++j) {
+			int v = (*j).first;
+      if (v == idx + 1)
+        (*j).second = ((static_cast<float>(model_size)*(1-k)) + input_feature_size)/network_speed_;
+    }
 
-    // set edges in-between layers
-    // client route
-    addEdge(stable_time_graph_, idx + 3, idx + 4, 0.0);
+    if (i > 0){
+      // update edege weights for transmitting a DNN model
+      for (j = time_graph_[idx - 2].begin(); j != time_graph_[idx - 2].end(); ++j) {
+        int v = (*j).first;
+        if (v == idx + 1)
+          (*j).second = (static_cast<float>(model_size)*(1-k))/network_speed_;
+      }
+    }
+  }
+}
 
-    // server route
-    if (i > 0)
-      addEdge(stable_time_graph_, idx - 2, idx + 1, 0.0);
+void ExecutionGraph::updateEnergyExecutionGraphWeight(float k) {
+  for (int i = 0; i < graph_layers_.size(); i++) {
+    int idx = (3 * i) + 1;
+    float input_feature_size = graph_layers_[i]->input_feature_size;
+    int model_size = graph_layers_[i]->model_size;
+
+    // update edege weights for transmitting a DNN model
+		list< pair<int, float> >::iterator j;
+		for (j = energy_graph_[idx].begin(); j != energy_graph_[idx].end(); ++j) {
+			int v = (*j).first;
+      if (v == idx + 1)
+        (*j).second = (transfer_watt * ((static_cast<float>(model_size)*(1-k)) + input_feature_size))/network_speed_;
+    }
+
+    if (i > 0){
+      // update edege weights for transmitting a DNN model
+      for (j = energy_graph_[idx - 2].begin(); j != energy_graph_[idx - 2].end(); ++j) {
+        int v = (*j).first;
+        if (v == idx + 1)
+          (*j).second = (transfer_watt * (static_cast<float>(model_size)*(1-k)))/network_speed_;
+      }
+    }
   }
 }
 
@@ -299,47 +323,12 @@ void ExecutionGraph::createEnergyExecutionGraph() {
   }
 }
 
-void ExecutionGraph::createStableEnergyExecutionGraph() {
-  stable_energy_graph_ = new list<pair<int, float> >[(3 * graph_layers_.size()) + 2];   // +2 for input,output
-
-  // edge from input
-  addEdge(stable_energy_graph_, 0, 1, 0.0);
-
-  for (int i = 0; i < graph_layers_.size(); i++) {
-    int idx = (3 * i) + 1;
-    float input_feature_size = graph_layers_[i]->input_feature_size;
-    float output_feature_size = graph_layers_[i]->output_feature_size;
-    float exec_time_c = graph_layers_[i]->exec_time_c;
-
-    // set edges inside a layer
-    addEdge(stable_energy_graph_, idx, idx + 1, transfer_watt * (input_feature_size/network_speed_));
-    addEdge(stable_energy_graph_, idx + 1, idx + 2, transfer_watt * (output_feature_size/network_speed_));
-    addEdge(stable_energy_graph_, idx, idx + 2, compute_watt * exec_time_c);
-
-    // set edges in-between layers
-    // client route
-    addEdge(stable_energy_graph_, idx + 2, idx + 3, 0.0);
-
-    // server route
-    if (i > 0)
-      addEdge(stable_energy_graph_, idx - 2, idx + 1, 0.0);
-  }
-}
-
 void ExecutionGraph::getBestPathForTime(list<pair<int, int> >* result) {
   shortestPath(TIME, result);
 }
 
-void ExecutionGraph::getBestPathForStableTime(list<pair<int, int> >* result) {
-  shortestPath(STABLE_TIME, result);
-}
-
 void ExecutionGraph::getBestPathForEnergy(list<pair<int, int> >* result) {
   shortestPath(ENERGY, result);
-}
-
-void ExecutionGraph::getBestPathForStableEnergy(list<pair<int, int> >* result) {
-  shortestPath(STABLE_ENERGY, result);
 }
 
 typedef pair<float, int> fiPair;
@@ -349,12 +338,10 @@ static bool isServerNode(ExecutionGraph::OptTarget opt_target, int id) {
 	int offset;
 	switch(opt_target) {
 		case ExecutionGraph::TIME:
-		case ExecutionGraph::STABLE_TIME:
 			offset = (id - 1) % 4;
 			result = (offset == 1) || (offset == 2);
 			break;
 		case ExecutionGraph::ENERGY:
-		case ExecutionGraph::STABLE_ENERGY:
 			offset = (id - 1) % 3;
 			result = (offset == 1);
 			break;
@@ -377,14 +364,6 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
 			break;
 		case ENERGY:
 			graph = energy_graph_;
-			V = (3 * graph_layers_.size()) + 2;
-			break;
-		case STABLE_TIME:
-			graph = stable_time_graph_;
-			V = (4 * graph_layers_.size()) + 2;
-			break;
-		case STABLE_ENERGY:
-			graph = stable_energy_graph_;
 			V = (3 * graph_layers_.size()) + 2;
 			break;
 		default:
@@ -449,7 +428,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
     }
     else if (isServerNode(opt_target, node) && !isServerNode(opt_target, path[node])) {
 
-			int nodes_per_layer = (opt_target == TIME || opt_target == STABLE_TIME) ? 4 : 3;
+			int nodes_per_layer = opt_target == TIME ? 4 : 3;
 
       // get index of real caffe layers
       int offloading_point = graph_layers_[(path[node] - 1)/nodes_per_layer]->start_layer_id;
@@ -476,6 +455,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
         }
         s_time += static_cast<float>(model_size)/network_speed_;
         s_time += graph_layers_[idx]->exec_time_s;
+        s_time += graph_layers_[idx]->loading_time_s;
       }
       cout << "local time : " << c_time << ", offload time : " << s_time << endl;
     }
