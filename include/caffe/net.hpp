@@ -8,11 +8,14 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio.hpp>
+
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
+using boost::asio::ip::tcp;
 using namespace std;
 
 namespace caffe {
@@ -126,7 +129,7 @@ class Net {
   /// @brief Writes the net to a proto.
   void ToProto(NetParameter* param, bool write_diff = false) const;
   /// @brief Writes the partial net to a proto
-  void ToProto(NetParameter* param, bool write_diff, int start, int end) const;
+  void ToProto(NetParameter* param, bool write_diff, int& start, int& end, bool add_input) const;
   void ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end) const;
   /// @brief Writes the net to an HDF5 file.
   void ToHDF5(const string& filename, bool write_diff = false) const;
@@ -269,6 +272,13 @@ class Net {
     after_backward_.push_back(value);
   }
 
+  // Get layers which will be sent to the server (exclude already transmitted layers)
+  // This returns <front part, rear part>
+  pair<pair<int, int>, pair<int, int> > getOffloadedLayersForIncrementalOffloading(int start, int end);
+
+  // Setting socket
+  void SetSocket(tcp::socket* s) {s_ = s;}
+
  protected:
   // Helpers for Init.
   /// @brief Append a new top blob to the net.
@@ -352,6 +362,12 @@ class Net {
   vector<Callback*> after_forward_;
   vector<Callback*> before_backward_;
   vector<Callback*> after_backward_;
+
+  // Ids for layers already offloaded to the server (We assume offloaded layers are consecutive)
+  pair<int, int> offloaded_layers_;
+
+  // Variable for connection with server
+  tcp::socket* s_;
 
 DISABLE_COPY_AND_ASSIGN(Net);
 };
