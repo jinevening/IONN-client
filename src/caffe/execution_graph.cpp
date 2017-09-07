@@ -169,7 +169,7 @@ void ExecutionGraph::setUpExecutionGraphLayers() {
 
 	// prototxt size
 	NetParameter layer_prototxt_param;
-	net_->ToProtoNoBlob(&layer_prototxt_param, false, current_layer->start_layer_id, current_layer->end_layer_id);
+	net_->ToProtoNoBlob(&layer_prototxt_param, false, current_layer->start_layer_id, current_layer->end_layer_id, false);
 	current_layer->prototxt_size = layer_prototxt_param.ByteSize();
 
 	// server-side loading time
@@ -226,7 +226,7 @@ void ExecutionGraph::createTimeExecutionGraph() {
     float loading_time_s = graph_layers_[i]->loading_time_s;
 
     // set edges inside a layer
-    addEdge(time_graph_, idx, idx + 1, (static_cast<float>(model_size) + input_feature_size)/network_speed_);
+    addEdge(time_graph_, idx, idx + 1, ((static_cast<float>(model_size) + input_feature_size)/network_speed_) + loading_time_s);
     addEdge(time_graph_, idx + 1, idx + 2, exec_time_s);
     addEdge(time_graph_, idx + 2, idx + 3, output_feature_size/network_speed_);
     addEdge(time_graph_, idx, idx + 3, exec_time_c);
@@ -237,26 +237,28 @@ void ExecutionGraph::createTimeExecutionGraph() {
 
     // server route
     if (i > 0){
-      addEdge(time_graph_, idx - 2, idx + 1, static_cast<float>(model_size)/network_speed_);
+      addEdge(time_graph_, idx - 2, idx + 1, (static_cast<float>(model_size)/network_speed_) + loading_time_s);
     }
   }
 }
 
-// model transfer cost is updated to (1 - k) * model_transfer_cost
+// model transfer cost (including model loading time at the server) is updated to (1 - k) * model_transfer_cost
 // ex1 : k = 0, model transfer cost is the same with first offloading
 // ex2 : k = 1, model transfer cost will be 0
+// also, model transfer cost is 
 void ExecutionGraph::updateTimeExecutionGraphWeight(float k) {
   for (int i = 0; i < graph_layers_.size(); i++) {
     int idx = (4 * i) + 1;
     float input_feature_size = graph_layers_[i]->input_feature_size;
     int model_size = graph_layers_[i]->model_size;
+    float loading_time_s = graph_layers_[i]->loading_time_s;
 
     // update edege weights for transmitting a DNN model
 		list< pair<int, float> >::iterator j;
 		for (j = time_graph_[idx].begin(); j != time_graph_[idx].end(); ++j) {
 			int v = (*j).first;
       if (v == idx + 1)
-        (*j).second = ((static_cast<float>(model_size)*(1-k)) + input_feature_size)/network_speed_;
+        (*j).second = (((static_cast<float>(model_size) * (1-k)) + input_feature_size)/network_speed_) + (loading_time_s * (1-k));
     }
 
     if (i > 0){
@@ -264,7 +266,7 @@ void ExecutionGraph::updateTimeExecutionGraphWeight(float k) {
       for (j = time_graph_[idx - 2].begin(); j != time_graph_[idx - 2].end(); ++j) {
         int v = (*j).first;
         if (v == idx + 1)
-          (*j).second = (static_cast<float>(model_size)*(1-k))/network_speed_;
+          (*j).second = (static_cast<float>(model_size)*(1-k))/network_speed_ + (loading_time_s * (1-k));
       }
     }
   }
@@ -419,7 +421,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
 //	for (int i = 0; i < V; ++i)
 //			cout << i << "\t\t" << dist[i] << endl;
 
-	cout << "Shortest path from src to dst" << endl;
+//	cout << "Shortest path from src to dst" << endl;
 	int node = V-1;
   int resume_node = 0;
 	while (node != src) {
@@ -437,33 +439,33 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
       result->push_front(make_pair(offloading_point, resume_point));
 
       // Logging for time opt (comparison beween local execution and offloading)
-      cout << "offload (" << offloading_point << ", " << resume_point << ") ";
-      float c_time = 0.0;
-      float s_time = 0.0;
-      int s = (path[node]-1)/4;
-      int e = (resume_node-1)/4;
-      for (int idx = s; idx <= e; idx++) {
-        c_time += graph_layers_[idx]->exec_time_c;
-        int model_size = graph_layers_[idx]->model_size;
-        float input_feature_size = graph_layers_[idx]->input_feature_size;
-        float output_feature_size = graph_layers_[idx]->output_feature_size;
-        if (idx == s) {
-          s_time += input_feature_size/network_speed_;
-        }
-        if (idx == e) {
-          s_time += output_feature_size/network_speed_;
-        }
-        s_time += static_cast<float>(model_size)/network_speed_;
-        s_time += graph_layers_[idx]->exec_time_s;
-        s_time += graph_layers_[idx]->loading_time_s;
-      }
-      cout << "local time : " << c_time << ", offload time : " << s_time << endl;
+//      cout << "offload (" << offloading_point << ", " << resume_point << ") ";
+//      float c_time = 0.0;
+//      float s_time = 0.0;
+//      int s = (path[node]-1)/4;
+//      int e = (resume_node-1)/4;
+//      for (int idx = s; idx <= e; idx++) {
+//        c_time += graph_layers_[idx]->exec_time_c;
+//        int model_size = graph_layers_[idx]->model_size;
+//        float input_feature_size = graph_layers_[idx]->input_feature_size;
+//        float output_feature_size = graph_layers_[idx]->output_feature_size;
+//        if (idx == s) {
+//          s_time += input_feature_size/network_speed_;
+//        }
+//        if (idx == e) {
+//          s_time += output_feature_size/network_speed_;
+//        }
+//        s_time += static_cast<float>(model_size)/network_speed_;
+//        s_time += graph_layers_[idx]->exec_time_s;
+//        s_time += graph_layers_[idx]->loading_time_s;
+//      }
+//      cout << "local time : " << c_time << ", offload time : " << s_time << endl;
     }
 
-		cout << node << " ";
+//		cout << node << " ";
 		node = path[node];
 	}
-	cout << node << endl;
+//	cout << node << endl;
 }
 
 }  // namespace caffe

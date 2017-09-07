@@ -18,7 +18,7 @@
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 
-#define BUFF_SIZE 1024*1024*64
+#define BUFF_SIZE 1024*1024*256
 #define PORT 7675
 
 using boost::asio::ip::tcp;
@@ -695,7 +695,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     /* Serialize prototxt */
     if (front_net.first != -1 || rear_net.first != -1) {
       NetParameter prototxt_param;
-      ToProtoNoBlob(&prototxt_param, false, offloading_point, resume_point);
+      ToProtoNoBlob(&prototxt_param, false, offloading_point, resume_point, true);
       prototxt_size = prototxt_param.ByteSize();
       prototxt_param.SerializeWithCachedSizesToArray(buff + 16);
       cout << "prototxt size : " << prototxt_size << " bytes" << endl;
@@ -1117,7 +1117,7 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff) const {
   }
 }
 template <typename Dtype>
-void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end) const {
+void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end, bool add_input) const {
   param->Clear();
   param->set_name(name_);
   LayerParameter* layer_param;
@@ -1125,7 +1125,7 @@ void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, 
   // If the first layer of the offloaded partition is not the input layer,
   // then we add dummy input layer and set the next layer's bottom as "data"
   // assumption : the first layer of offloaded partition has only one input
-  if (start > 0) {
+  if (add_input) {
     layer_param = param->add_layer();
     // Add a dummy input layer
     layer_param->set_name("data");
@@ -1171,7 +1171,6 @@ void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, 
   }
   else {
     // Serialize layers
-    cout << "Serializing " << (end - start + 1) << " layers" << endl;
     for (int i = start; i <= end; ++i) {
       layer_param = param->add_layer();
       layers_[i]->ToProtoNoBlob(layer_param, write_diff);

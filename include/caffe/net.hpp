@@ -130,7 +130,7 @@ class Net {
   void ToProto(NetParameter* param, bool write_diff = false) const;
   /// @brief Writes the partial net to a proto
   void ToProto(NetParameter* param, bool write_diff, int& start, int& end, bool add_input) const;
-  void ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end) const;
+  void ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end, bool add_input) const;
   /// @brief Writes the net to an HDF5 file.
   void ToHDF5(const string& filename, bool write_diff = false) const;
 
