@@ -170,6 +170,9 @@ std::vector<float> Classifier::Predict(const cv::Mat& img) {
   timechk = (double)(finish.tv_sec) + (double)(finish.tv_usec) / 1000000.0 -
             (double)(start.tv_sec) - (double)(start.tv_usec) / 1000000.0;
   cout << "Local Forward time : " << timechk << " s" << endl;
+  std::ofstream timeFile("time_measurement.csv", std::ios::app);
+  timeFile << "," << timechk << std::endl;
+  timeFile.close();
 
 
   /* Copy the output layer to a std::vector */
@@ -260,6 +263,11 @@ int main(int argc, char** argv) {
 
   cv::Mat img = cv::imread(file, -1);
   CHECK(!img.empty()) << "Unable to decode image " << file;
+
+  std::ofstream timeFile("time_measurement.csv", std::ios::app);
+  timeFile << ",Local";
+  timeFile.close();
+
   std::vector<Prediction> predictions = classifier.Classify(img);
 
   /* Print the top N predictions. */
