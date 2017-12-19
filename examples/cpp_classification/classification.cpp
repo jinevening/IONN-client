@@ -268,7 +268,13 @@ int main(int argc, char** argv) {
   timeFile << ",Local";
   timeFile.close();
 
-  std::vector<Prediction> predictions = classifier.Classify(img);
+// 
+  std::vector<Prediction> predictions;
+  for(int i=0; i<40; i++){
+    std::cout << "[Offloading " << i << " ]  :  ";
+  predictions = classifier.Classify(img);
+  }
+//
 
   /* Print the top N predictions. */
   for (size_t i = 0; i < predictions.size(); ++i) {

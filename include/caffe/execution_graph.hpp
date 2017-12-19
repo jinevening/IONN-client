@@ -33,8 +33,7 @@ class ExecutionGraphLayer {
      exec_time_s(0.0),
      input_s(0.0),
      output_s(0.0),
-	 prototxt_size(0),
-	 loading_time_s(0.0)
+     loading_time_s(0.0)
     {}
 
   void printExecutionGraphLayer();
@@ -61,9 +60,6 @@ class ExecutionGraphLayer {
   int start_layer_id;
   int end_layer_id;
 
-  // prototxt size of this layer (data to be transmitted)
-  int prototxt_size;
-
   // server-side loading time
   float loading_time_s;
 };
@@ -80,8 +76,9 @@ class ExecutionGraph {
   };
 
   explicit ExecutionGraph(Net<float>* net, float network_speed)
-    : transfer_watt(1.0),
-      compute_watt(1.0),
+    : idle_watt_(3.977),
+      transfer_watt_(6.611),
+      compute_watt_(7.239),
       time_graph_(NULL),
       energy_graph_(NULL),
       network_speed_(network_speed * 1024.0 * 1024.0 / 8000.0 ),  // network_speed Mbps
@@ -100,24 +97,29 @@ class ExecutionGraph {
   // print simplified layers
   void printLayers();
 
-  // print best path for time/energy
-  void getBestPathForTime(list<pair<int, int> >* result);
-  void getBestPathForEnergy(list<pair<int, int> >* result);
+  // get best partitioning plan
+  void getBestPartitioningPlan(list<pair<int, int> >* result, OptTarget opt_target);
 
   // update edge weights of NN execution graph
   // model transfer cost will decrease by k
+  void updateNNExecutionGraphWeight(float k, OptTarget opt_target);
+
+  // create NN execution graph for time/energy optimization
+  void createNNExecutionGraph(OptTarget opt_target);
+
+ private:
+  void getBestPathForTime(list<pair<int, int> >* result);
+  void getBestPathForEnergy(list<pair<int, int> >* result);
+  void createTimeExecutionGraph();
+  void createEnergyExecutionGraph();
   void updateTimeExecutionGraphWeight(float k);
   void updateEnergyExecutionGraphWeight(float k);
 
-  // create NN execution graph for time/energy optimization
-  void createTimeExecutionGraph();
-  void createEnergyExecutionGraph();
+  // power for idle/transfer/compute
+  float idle_watt_;
+  float transfer_watt_;
+  float compute_watt_;
 
-  // average watt for transfer/compute
-  float transfer_watt;
-  float compute_watt;
-
- private:
   // compute dominators to handle multiple path problem
   void computeDominatorLayers();
   void setUpExecutionGraphLayers();
