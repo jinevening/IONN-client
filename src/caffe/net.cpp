@@ -415,8 +415,23 @@ bool Net<Dtype>::server_predict(const string& prediction_file){
 			execution_time = a * InputSize + b;
 		}
 		layers_[i]->set_exec_time_s(execution_time);
-	}
+	  cout << i << " " << layers_[i]->layer_param().name() << " " << execution_time << endl;
+  }
 	return true;
+}
+
+// Server side using profile
+template <typename Dtype>
+void Net<Dtype>::server_predict_from_profile(const string& prediction_file){
+	std::ifstream predictionModel(prediction_file.c_str(), ios::in);
+	string line;
+	if(predictionModel.is_open()){
+		int i = -1;
+		while(getline(predictionModel, line) && ++i < (int)layers_.size()){
+			layers_[i]->set_exec_time_s(atof(line.substr(line.rfind(' ')).c_str()));
+		}
+		predictionModel.close();
+	}
 }
 
 // Client side prediction model
@@ -666,6 +681,12 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 	struct timeval start_t;
 	struct timeval finish_t;
 
+  /* Local execution */
+  if (plan == NULL) {
+    ForwardFromTo(0, layers_.size() - 1);
+    return;
+  }
+
   /* Buffer for data transmission */
   unsigned char* buff = new unsigned char[BUFF_SIZE];
   memset(buff, 0, sizeof(BUFF_SIZE));
@@ -676,59 +697,12 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
   for (i = plan->begin(); i != plan->end(); ++i) {
     int offloading_point = (*i).first;
     int resume_point = (*i).second;
-    int prototxt_size = 0;
-    int front_model_size = 0;
-    int rear_model_size = 0;
     int feature_size = 0;
-    int total_size = 0;
     CHECK_EQ(sizeof(int), 4);
     if (offloading_point > 1)
       ForwardFromTo(start, offloading_point - 1);
 
     gettimeofday(&start_t, NULL);
-
-    /* Get NN layers to-be-offloaded (exclude layers already offloaded to the server) */
-    pair<pair<int, int>, pair<int, int> > result = getOffloadedLayersForIncrementalOffloading(offloading_point, resume_point);
-    pair<int, int> front_net = result.first;
-    pair<int, int> rear_net = result.second;
-
-    /* Serialize prototxt */
-    if (front_net.first != -1 || rear_net.first != -1) {
-      NetParameter prototxt_param;
-      ToProtoNoBlob(&prototxt_param, false, offloading_point, resume_point, true);
-      prototxt_size = prototxt_param.ByteSize();
-      prototxt_param.SerializeWithCachedSizesToArray(buff + 16);
-      cout << "prototxt size : " << prototxt_size << " bytes" << endl;
-    }
-    else {
-      prototxt_size = 0;
-    }
-
-    /* Serialize front model blobs */
-    if (front_net.first != -1) {
-      NetParameter front_net_param;
-      ToProto(&front_net_param, false, front_net.first, front_net.second, true);
-      front_model_size = front_net_param.ByteSize();
-      front_net_param.SerializeWithCachedSizesToArray(buff + 16 + prototxt_size);
-      cout << "Front model blobs size : " << front_model_size << " bytes" << endl;
-    }
-    else {
-      front_model_size = 0;
-      cout << "Front model blobs size : 0 bytes" << endl;
-    }
-
-    /* Serialize rear model blobs */
-    if (rear_net.first != -1) {
-      NetParameter rear_net_param;
-      ToProto(&rear_net_param, false, rear_net.first, rear_net.second, false);
-      rear_model_size = rear_net_param.ByteSize();
-      rear_net_param.SerializeWithCachedSizesToArray(buff + 16 + prototxt_size + front_model_size);
-      cout << "Rear model blobs size : " << rear_model_size << " bytes" << endl;
-    }
-    else {
-      rear_model_size = 0;
-      cout << "Rear model blobs size : 0 bytes" << endl;
-    }
 
     /* Serialize feature data */
     BlobProto feature_proto;
@@ -739,15 +713,10 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
       bottom_vecs_[offloading_point][0]->ToProto(&feature_proto, false);
     }
     feature_size = feature_proto.ByteSize();
-    feature_proto.SerializeWithCachedSizesToArray(buff + 16 + prototxt_size + front_model_size + rear_model_size);
+    feature_proto.SerializeWithCachedSizesToArray(buff + 4);
     cout << "Feature blob size : " << feature_size << " bytes" << endl;
 
-    total_size = prototxt_size + front_model_size + rear_model_size + feature_size;
-
-    memcpy(buff, &total_size, 4);
-    memcpy(buff + 4, &prototxt_size, 4);
-    memcpy(buff + 8, &front_model_size, 4);
-    memcpy(buff + 12, &rear_model_size, 4);
+    memcpy(buff, &feature_size, 4);
 
     gettimeofday(&finish_t, NULL);
     timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
@@ -755,7 +724,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     cout << "Time for serializing model + feature : " << timechk << " s" << endl;
 
     /* Send offloading request to the server */
-    boost::asio::write(*s_, boost::asio::buffer(buff, 16 + total_size));
+    boost::asio::write(*s_, boost::asio::buffer(buff, 4 + feature_size));
 
     int output_size = 0;	// output size
     unsigned char* buffer_ptr = buff;
@@ -790,18 +759,15 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 
     if (bottom_vecs_.size() > resume_point + 1) {
       /* Give input after receiving data */
-      bottom_vecs_[resume_point + 1][0]->FromProto(received_data);
+      bottom_vecs_[resume_point + 1][0]->FromProto(received_data, false);
     }
     else {
       /* This is the last layer */
-      net_output_blobs_[0]->FromProto(received_data);
+      net_output_blobs_[0]->FromProto(received_data, false);
     }
 
     /* Set next starting point */
     start = resume_point + 1;
-
-    /* Updated offloaded layers */
-    offloaded_layers_ = make_pair(offloading_point, resume_point);
   }
 
   /* Execute the rest of DNN (if there is any) */

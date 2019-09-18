@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <boost/asio.hpp>
+#include <boost/thread.hpp>
 
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
@@ -29,6 +30,10 @@ namespace caffe {
 template <typename Dtype>
 class Net {
  public:
+
+  // Ids for layers already offloaded to the server (We assume offloaded layers are consecutive)
+  pair<int, int> offloaded_layers_;
+
   explicit Net(const NetParameter& param);
   explicit Net(const string& param_file, Phase phase,
       const int level = 0, const vector<string>* stages = NULL);
@@ -245,6 +250,7 @@ class Net {
 
   // Prediction Model
   bool server_predict(const string& prediction_file = "");
+  void server_predict_from_profile(const string& prediction_file = "");
   void client_predict(const string& prediction_file = "");
 
   // Invoked at specific points during an iteration
@@ -362,9 +368,6 @@ class Net {
   vector<Callback*> after_forward_;
   vector<Callback*> before_backward_;
   vector<Callback*> after_backward_;
-
-  // Ids for layers already offloaded to the server (We assume offloaded layers are consecutive)
-  pair<int, int> offloaded_layers_;
 
   // Variable for connection with server
   tcp::socket* s_;
