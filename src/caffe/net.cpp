@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <termios.h>
 
 #include "hdf5/serial/hdf5.h"
 
@@ -260,7 +261,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   debug_info_ = param.debug_info();
   server_predict();
   client_predict();
-  offloaded_layers_ = make_pair(-1, -1);
+  offloaded_layers_.push_back(make_pair(-1, -1));
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
 }
 
@@ -638,41 +639,6 @@ Dtype Net<Dtype>::ForwardTo(int end) {
   return ForwardFromTo(0, end);
 }
 
-template <typename Dtype>
-pair<pair<int, int>, pair<int, int> > Net<Dtype>::getOffloadedLayersForIncrementalOffloading(int start, int end) {
-  int offloaded_start = offloaded_layers_.first;
-  int offloaded_end = offloaded_layers_.second;
-  int front_first;
-  int front_second;
-  int rear_first;
-  int rear_second;
-
-  /* Nothing has been offloaded. return every layer as a front model */
-  if (offloaded_layers_.first == -1) {
-    return make_pair(make_pair(start, end), make_pair(-1, -1));
-  }
-
-  /* Get front model */
-  if (start < offloaded_start) {
-    front_first = start;
-    front_second = offloaded_start - 1;
-  }
-  else {
-    front_first = -1;
-    front_second = - 1;
-  }
-  
-  /* Get rear model */
-  if (offloaded_end < end) {
-    rear_first = offloaded_end + 1;
-    rear_second = end;
-  }
-  else {
-    rear_first = -1;
-    rear_second = - 1;
-  }
-  return make_pair(make_pair(front_first, front_second), make_pair(rear_first, rear_second));
-}
 
 template <typename Dtype>
 void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
@@ -683,6 +649,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 
   /* Local execution */
   if (plan == NULL) {
+    cout <<"Local execution " << endl;
     ForwardFromTo(0, layers_.size() - 1);
     return;
   }
@@ -706,27 +673,34 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 
     /* Serialize feature data */
     BlobProto feature_proto;
-    if (offloading_point == 0) {
+    if (offloading_point <= 1) {
       net_input_blobs_[0]->ToProto(&feature_proto, false);
     }
     else {
+      cout << "bottom_vecs_[offloading_point][0].size() "<<bottom_vecs_[offloading_point].size();
       bottom_vecs_[offloading_point][0]->ToProto(&feature_proto, false);
     }
     feature_size = feature_proto.ByteSize();
     feature_proto.SerializeWithCachedSizesToArray(buff + 4);
-    cout << "Feature blob size : " << feature_size << " bytes" << endl;
+//    cout << "Feature blob size : " << feature_size << " bytes" << endl;
 
     memcpy(buff, &feature_size, 4);
 
     gettimeofday(&finish_t, NULL);
     timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
               (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
-    cout << "Time for serializing model + feature : " << timechk << " s" << endl;
-
+//    cout << "Time for serializing model + feature : " << timechk << " s" << endl;
     /* Send offloading request to the server */
+//    gettimeofday(&start_t, NULL);
     boost::asio::write(*s_, boost::asio::buffer(buff, 4 + feature_size));
+    tcdrain(s_->native_handle());
+//    gettimeofday(&finish_t, NULL);
+//    timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
+//    (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
+//    cout <<"Time to write to socket feature data" << timechk<< endl;
 
     int output_size = 0;	// output size
+    int computed_upto = 0;
     unsigned char* buffer_ptr = buff;
     try {
       /* Receive data */
@@ -735,6 +709,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
         size_t length = s_->read_some(boost::asio::buffer(buffer_ptr, BUFF_SIZE), error);
         if (buff == buffer_ptr) {
           memcpy(&output_size, buff, 4);
+          memcpy(&computed_upto, buff+4, 4);
 //          cout << "Total size " << output_size << " bytes" << endl;
         }
         buffer_ptr += length;
@@ -743,7 +718,7 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
           break; // Connection closed cleanly by peer.
         else if (error)
           throw boost::system::system_error(error); // Some other error.
-      } while ((buffer_ptr - buff) < output_size + 4);
+      } while ((buffer_ptr - buff) < output_size + 8);
     }
     catch (std::exception& e) {
       std::cerr << "Exception in thread: " << e.what() << "\n";
@@ -755,11 +730,13 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     // int valread = recv(client_socket, buff, BUFF_SIZE, 0);
     // cout << "Received " << valread << " bytes" << endl;
     BlobProto received_data;
-    received_data.ParseFromArray(buff + 4, output_size);
+    received_data.ParseFromArray(buff + 8, output_size);
 
-    if (bottom_vecs_.size() > resume_point + 1) {
+//    if (bottom_vecs_.size() > resume_point + 1) {
+    if(bottom_vecs_.size() > computed_upto + 1) {
       /* Give input after receiving data */
-      bottom_vecs_[resume_point + 1][0]->FromProto(received_data, false);
+//      bottom_vecs_[resume_point + 1][0]->FromProto(received_data, false);
+      bottom_vecs_[computed_upto + 1][0]->FromProto(received_data, false);
     }
     else {
       /* This is the last layer */
@@ -767,7 +744,8 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     }
 
     /* Set next starting point */
-    start = resume_point + 1;
+//    start = resume_point + 1;
+    start = computed_upto + 1;
   }
 
   /* Execute the rest of DNN (if there is any) */
@@ -1087,6 +1065,7 @@ void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, 
   param->Clear();
   param->set_name(name_);
   LayerParameter* layer_param;
+  bool dolog = false;
 
   // If the first layer of the offloaded partition is not the input layer,
   // then we add dummy input layer and set the next layer's bottom as "data"
@@ -1101,26 +1080,44 @@ void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, 
     InputParameter* input_param = new InputParameter();
     input_param->add_shape();
     for (int i = 0; i < bottom_vecs_[start].size(); i++) {
-      // cout << "# of input (must be 1): " << bottom_vecs_[start].size() << endl;
+      if(dolog)
+        cout << "# of input (must be 1): " << bottom_vecs_[start].size() <<" "<< endl;
       for (int j = 0; j < bottom_vecs_[start][i]->num_axes(); j++) {
         input_param->mutable_shape()->Mutable(0)->add_dim(bottom_vecs_[start][i]->shape(j));
+        if(dolog)
+          cout <<j<<" ";
       }
+      if(dolog)
+        cout <<endl;
     }
     layer_param->set_allocated_input_param(input_param);
 
     // change original bottom name to 'data'
     string original_name = layers_[start]->layer_param().bottom(0);
+    cout << "Size: " << layers_[start]->layer_param().blobs_size() << endl;
+
     cout << "Original bottom name: " << original_name << endl;
     for (int i = start; i <= end; i++) {
       LayerParameter& tmp = const_cast<LayerParameter&>(layers_[i]->layer_param());
       for (int j = 0; j < bottom_vecs_[i].size(); j++) {
-        if (tmp.bottom(j).compare(original_name) == 0)
+        if (tmp.bottom(j).compare(original_name) == 0){
           tmp.set_bottom(j, "data");
+          if(dolog)
+            cout <<" tmp.set_bottom, " << tmp.bottom(j) << endl;
+        }
+        if(dolog){
+          cout <<"tmp.bottom("<<j<<"): " <<tmp.bottom(j) ;
+          for(int l = 0; l < top_vecs_[i].size(); l++){
+            cout<<" "<<tmp.top(l);
+          }
+          cout << endl;
+        }
       }
     }
 
     // Serialize layers
-    cout << "Serializing " << (end - start + 1) << " layers" << endl;
+    if(dolog)
+      cout << "Serializing " << (end - start + 1) << " layers" << endl;
     for (int i = start; i <= end; ++i) {
       layer_param = param->add_layer();
       layers_[i]->ToProtoNoBlob(layer_param, write_diff);

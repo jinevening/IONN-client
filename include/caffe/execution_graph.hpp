@@ -64,6 +64,12 @@ class ExecutionGraphLayer {
   float loading_time_s;
 };
 
+struct offloadInfo {//Type used in execution graph
+  int left;
+  int right;
+  float gain;
+};
+
 /**
  * @brief Creates an execution graph to find out the shortest path for offloading
  *
@@ -100,6 +106,8 @@ class ExecutionGraph {
   // get best partitioning plan
   void getBestPartitioningPlan(list<pair<int, int> >* result, OptTarget opt_target);
 
+  void getBestPartitioningPlanOld(list<pair<int, int> >* result, OptTarget opt_target);
+
   // update edge weights of NN execution graph
   // model transfer cost will decrease by k
   void updateNNExecutionGraphWeight(float k, OptTarget opt_target);
@@ -110,6 +118,9 @@ class ExecutionGraph {
  private:
   void getBestPathForTime(list<pair<int, int> >* result);
   void getBestPathForEnergy(list<pair<int, int> >* result);
+  void getBestPathForTimeOld(list<pair<int, int> >* result);
+  void getBestPathForEnergyOld(list<pair<int, int> >* result);
+
   void createTimeExecutionGraph();
   void createEnergyExecutionGraph();
   void updateTimeExecutionGraphWeight(float k);
@@ -119,6 +130,8 @@ class ExecutionGraph {
   float idle_watt_;
   float transfer_watt_;
   float compute_watt_;
+  // remaining upload size, used for calculating area gain per remaining upload
+  int upload_size_remaining_;
 
   // compute dominators to handle multiple path problem
   void computeDominatorLayers();
@@ -127,6 +140,35 @@ class ExecutionGraph {
 
   void addEdge(list<pair<int, float> > * graph, int src, int dst, float weight);
   void shortestPath(OptTarget opt_target, list<pair<int, int> >* result);
+  void shortestPathOld(OptTarget opt_target, list<pair<int, int> >* result);
+
+  float distClient(list<pair<int,float> >* graph, int left, int right);
+  float distServer(list<pair<int,float> >* graph, int left, int right);
+  float gain(list<pair<int,float> >* graph, int left, int right);
+  float gainPerCostSCDiff(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded);
+  float gainDiffPerCost(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded);
+  float areaPerCost(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded);
+  int modelSize(int left, int right);
+  int getLeftRight(list<offloadInfo> &offloaded, int left, int right, bool getLeft);
+
+  void createCandidate( list<pair<int,float> >* graph, 
+                        list<offloadInfo > &toProcess,
+                        list<offloadInfo > &candidates 
+                        );
+  void createCandidateArea( list<pair<int,float> >* graph, 
+  list<offloadInfo > &toProcess,
+  list<offloadInfo > &candidates 
+  );
+  offloadInfo getMaxCandidate(list<offloadInfo > &candidates, int left = -1, int right = 99);
+  offloadInfo getMaxCandidateFirst(list<offloadInfo > &candidates, list<pair<int,float> >* graph);
+
+  void insertToOffload(list<offloadInfo> &offloaded, offloadInfo toOffload); 
+  void removeCandidates( list<offloadInfo > &candidates, int left, int right);
+  void updateToProcess(list<offloadInfo> &toProcess, int left, int right);
+  void updateCandidates(list<offloadInfo> &candidates, int left, int right, 
+                        list<pair<int,float> >* graph, list<offloadInfo> &offloaded);
+  void updateCandidates(list<offloadInfo> &candidates, list<pair<int,float> >* graph, list<offloadInfo> &offloaded);
+
   
   // adjacency list graph implementation
   list<pair<int, float> > * time_graph_;					// execution graph for migrating

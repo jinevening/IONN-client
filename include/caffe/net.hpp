@@ -32,7 +32,7 @@ class Net {
  public:
 
   // Ids for layers already offloaded to the server (We assume offloaded layers are consecutive)
-  pair<int, int> offloaded_layers_;
+  list< pair<int, int> > offloaded_layers_;
 
   explicit Net(const NetParameter& param);
   explicit Net(const string& param_file, Phase phase,
@@ -280,7 +280,7 @@ class Net {
 
   // Get layers which will be sent to the server (exclude already transmitted layers)
   // This returns <front part, rear part>
-  pair<pair<int, int>, pair<int, int> > getOffloadedLayersForIncrementalOffloading(int start, int end);
+//  pair<pair<int, int>, pair<int, int> > getOffloadedLayersForIncrementalOffloading(int start, int end);
 
   // Setting socket
   void SetSocket(tcp::socket* s) {s_ = s;}

@@ -288,6 +288,23 @@ void ExecutionGraph::getBestPartitioningPlan(list<pair<int, int> >* result, OptT
   }
 }
 
+void ExecutionGraph::getBestPartitioningPlanOld(list<pair<int, int> >* result, OptTarget opt_target) {
+switch(opt_target) {
+  case TIME:
+    CHECK(time_graph_ != NULL);
+    getBestPathForTimeOld(result);
+    break;
+  case ENERGY:
+    CHECK(energy_graph_ != NULL);
+    getBestPathForEnergyOld(result);
+    break;
+  default:
+    cout << "Wrong optimization target" << endl;
+    CHECK(false);
+  }
+}
+
+
 // model transfer cost (including model loading time at the server) is updated to (1 - k) * model_transfer_cost
 // ex1 : k = 0, model transfer cost is the same with first offloading
 // ex2 : k = 1, model transfer cost will be 0
@@ -361,13 +378,21 @@ void ExecutionGraph::getBestPathForEnergy(list<pair<int, int> >* result) {
   shortestPath(ENERGY, result);
 }
 
+void ExecutionGraph::getBestPathForTimeOld(list<pair<int, int> >* result) {
+  shortestPathOld(TIME, result);
+}
+
+void ExecutionGraph::getBestPathForEnergyOld(list<pair<int, int> >* result) {
+  shortestPathOld(ENERGY, result);
+}
+
 typedef pair<float, int> fiPair;
 
 static inline bool isServerNode(int id) {
 	return (id % 3) != 1;
 }
 
-void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* result) {
+void ExecutionGraph::shortestPathOld(OptTarget opt_target, list<pair<int, int> >* result) {
 
   list<pair<int, float> >* graph = NULL;
   int V = (3 * graph_layers_.size()) + 2;
@@ -447,6 +472,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
       int offloading_point = graph_layers_[(path[node] - 1)/nodes_per_layer]->start_layer_id;
       int resume_point = graph_layers_[(resume_node - 1)/nodes_per_layer]->end_layer_id;
 
+      result->push_front(make_pair(-1, -1));
       result->push_front(make_pair(offloading_point, resume_point));
     }
 
@@ -455,5 +481,556 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
   }
 //	  cout << node << endl;
 }
+
+float ExecutionGraph::distClient(list<pair<int,float> >* graph, int left, int right) {
+  int u = 1+ 3*left;
+  int v = 1+ 3*right;
+  float dist = 0.0;
+  list< pair<int, float> >::iterator i;
+  for (; u <= v; u += 3) {
+    i = graph[u].begin();
+    if ((*i).first != u+3){
+      ++i;  //second pair contains dist of client to client, calculation
+    }
+    int dest = (*i).first;
+    float weight = (*i).second;
+    if(dest != u+3) {
+      cout<<"distClient destination Error " << "from " << u << " to "<< dest << endl;
+    }
+    dist += weight;
+  }
+//  cout <<"distClient: " << dist << endl ;
+  return dist;
+}
+
+float ExecutionGraph::distServer(list<pair<int,float> >* graph, int left, int right) {
+  int u = 1+ 3*left;
+  int v = 1+ 3*right;
+  int dest;
+  float weight;
+  float dist = 0.0;
+  list< pair<int, float> >::iterator i;
+
+  i = graph[u].begin();
+  if((*i).first != u+1){
+    i++;
+  }
+  if((*i).first != u+1){
+    cout<<"distServer destination Error";
+  }
+  dist += (*i).second; //dist of client to server, data
+  for (int j = u; j <= v; j= j+3) {
+    i = graph[j+1].begin();
+/*    if((*i).first != u+2){
+      i++;
+    }*/
+    dest = (*i).first;
+    weight = (*i).second;
+    if(dest != j+2) {
+      cout<<"distServer destination Error";
+    }
+    dist += weight;  //dist of server to server, calculation
+  }
+
+//  u--;
+  i = graph[v+2].begin();
+  if((*i).first != v+3){
+    i++;
+  }
+  dest = (*i).first;
+  weight = (*i).second;
+  if( dest != v+3) {
+    cout <<"distServer destination Error";
+  }
+  dist += weight; //dist of server to client, data
+
+//  cout <<"distServer: " << dist << endl ;
+  return dist;
+}
+
+float ExecutionGraph::gain(list<pair<int,float> >* graph, int left, int right) {
+  float speedup;
+  speedup = distClient(graph, left, right) - distServer(graph, left, right);
+  return speedup;
+}
+
+float ExecutionGraph::gainPerCostSCDiff(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded) {
+  int l = getLeftRight(offloaded, left, right, true);
+  int r = getLeftRight(offloaded, left, right, false);
+
+//  float cost = (float)modelSize(left, right);
+  float scgain = gain(graph, l, r);
+//  float g = scgain/(cost/(network_speed_*1000.0*1000.0/1024.0/1024));
+  float g = scgain/(modelSize(l,r)/(network_speed_*1000.0*1000.0/1024.0/1024));
+
+  return g;
+}
+
+float ExecutionGraph::gainDiffPerCost(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded) {
+  int l = getLeftRight(offloaded, left, right, true);
+  int r = getLeftRight(offloaded, left, right, false);
+
+  float prevdist = 0.0;
+  int ltest=left;
+  int rtest=right;
+  for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
+    if( i->left == right + 1 or i->right == left - 1){
+      prevdist += distServer(graph, i->left, i->right);
+      if(i->left < ltest){
+        ltest=i->left;
+      }
+      if(i->right > rtest){
+        rtest=i->right;
+      }
+    }
+  }
+
+  prevdist += distClient(graph, left, right);
+
+  if( ltest != l or rtest != r){
+    cout << "gainDiffPerCost wrong" << endl;
+  }
+
+//  cout << left << "," << right << " to "<<l << "," << r<< " ";
+//  int cost = modelSize(l, r);
+  float cost = (float)modelSize(left, right);
+//  cout <<"modelsize: " << modelSize(l, r) << " netoffloadratio: "<<  gain(graph, l, r)/modelSize(l,r) << " speedup: "<<gain(graph, l, r) << " networkspeed: "<< network_speed_*1000*1000*1000/(1024*1024)<< " effperuploadspeed: "<< gain(graph,l,r)*network_speed_*1000*1000.0/(1024.0*1024*modelSize(l,r))<<endl;
+  float sgain = distServer(graph, l, r);
+//  cout << "serverclientdiff: "<<scgain << " prevtime: " << gainsofar<<endl;
+  float g = (prevdist-sgain)/(cost/(network_speed_*1000.0*1000.0/1024.0/1024));
+//  float g = gain(graph, l, r)*(upload_size_remaining_-cost)/cost;
+  return g;
+}
+
+float ExecutionGraph::areaPerCost(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded) {
+  int l = getLeftRight(offloaded, left, right, true);
+  int r = getLeftRight(offloaded, left, right, false);
+
+  float prevdist = 0.0;
+  int ltest=left;
+  int rtest=right;
+  for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
+    if( i->left == right + 1 or i->right == left - 1){
+      prevdist += distServer(graph, i->left, i->right);
+      if(i->left < ltest){
+        ltest=i->left;
+      }
+      if(i->right > rtest){
+        rtest=i->right;
+      }
+    }
+  }
+
+  prevdist += distClient(graph, left, right);
+
+  if( ltest != l or rtest != r){
+    cout << "gainDiffPerCost wrong" << endl;
+  }
+
+  float cost = (float)modelSize(left, right);
+  float sgain = distServer(graph, l, r);
+//  cout << "serverclientdiff: "<<scgain << " prevtime: " << gainsofar<<endl;
+  float g = (prevdist-sgain)*(upload_size_remaining_-cost)/cost/1000.0;
+//  float g = gain(graph, l, r)*(upload_size_remaining_-cost)/cost;
+  return g;
+}
+
+
+int ExecutionGraph::modelSize(int left, int right){
+  int cost = 0;
+  for(int i = left; i <= right; ++i){
+    cost += graph_layers_[i]->model_size;
+  }
+  return cost;
+}
+
+void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* result) {
+  list<pair<int, float> >* graph = NULL;
+  int V = (3 * graph_layers_.size()) + 2;
+  switch(opt_target) {
+    case TIME:
+      graph = time_graph_;
+      break;
+    case ENERGY:
+      graph = energy_graph_;
+      break;
+    default:
+			// unreachable
+      CHECK(false);
+  }
+
+  updateNNExecutionGraphWeight(0.999, opt_target);
+//  createNNExecutionGraph(opt_target);
+
+  int src = 0;
+
+	// Save the previous node of each node to restore the shortest path
+	vector<int> path(V, -1);
+
+	// Create a priority queue to store vertices that
+	// are being preprocessed
+	priority_queue< fiPair, vector <fiPair> , greater<fiPair> > pq;
+
+	// Create a vector for distances and initialize all
+	// distances as infinite (INF)
+	vector<float> dist(V, INF);
+
+	// Insert source itself in priority queue and initialize
+	// its distance as 0.
+	pq.push(make_pair(0.0, src));
+	dist[src] = 0.0;
+
+	/* Looping till priority queue becomes empty (or all
+		distances are not finalized) */
+	while (!pq.empty())	{
+		// The first vertex in pair is the minimum distance
+		// vertex, extract it from priority queue.
+		int u = pq.top().second;
+		pq.pop();
+
+		// 'i' is used to get all adjacent vertices of a vertex
+		list< pair<int, float> >::iterator i;
+		for (i = graph[u].begin(); i != graph[u].end(); ++i) {
+			// Get vertex label and weight of current adjacent of u
+			int v = (*i).first;
+			float weight = (*i).second;
+
+			//  If there is shorted path to v through u.
+			if (dist[v] > dist[u] + weight) { 
+				// Updating distance of v
+				dist[v] = dist[u] + weight;
+				pq.push(make_pair(dist[v], v));
+				path[v] = u;
+			}
+		}
+	}
+
+  list<offloadInfo> toProcess;
+  list<offloadInfo> candidates;
+  list<offloadInfo> offloaded;
+  upload_size_remaining_ = 0;
+  int node1 = V-1;
+  int resume_node1 = 0;
+  while (node1 != src) {
+    if (!isServerNode(node1) && isServerNode(path[node1])) {
+      resume_node1 = path[node1];
+    }
+    else if (isServerNode(node1) && !isServerNode(path[node1])) {
+      int nodes_per_layer = 3;
+      int off_index = (path[node1]-1)/nodes_per_layer;
+      int res_index = (resume_node1-1)/nodes_per_layer;
+
+      offloadInfo t = {off_index, res_index, gainPerCostSCDiff(graph, off_index, res_index, offloaded)};
+      upload_size_remaining_ += modelSize(off_index, res_index);
+      toProcess.push_back(t);
+
+    }
+
+    node1 = path[node1];
+
+  }
+
+
+  createCandidate(graph, toProcess, candidates);
+
+
+  offloadInfo max_candidate;
+  max_candidate = getMaxCandidateFirst(candidates, graph);
+  if(max_candidate.left != -999){ // if valid first candidate
+    insertToOffload(offloaded, max_candidate);
+    for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
+      int offloading_point = graph_layers_[i->left]->start_layer_id;
+      int resume_point = graph_layers_[i->right]->end_layer_id;
+      result->push_back(make_pair(offloading_point, resume_point));
+    }
+    result->push_back(make_pair(-1, -1));
+
+    removeCandidates(candidates, max_candidate.left, max_candidate.right);
+    updateCandidates(candidates, max_candidate.left, max_candidate.right, graph, offloaded);
+    updateToProcess(toProcess, max_candidate.left, max_candidate.right);
+  }
+
+
+
+  while(!toProcess.empty()){
+    offloadInfo max_candidate;
+    max_candidate = getMaxCandidate(candidates);
+
+
+    offloadInfo smaller;
+    smaller =  getMaxCandidate(candidates, max_candidate.left, max_candidate.right);
+    while(smaller.left != -999){
+      max_candidate = smaller;
+      smaller = getMaxCandidate(candidates, max_candidate.left, max_candidate.right);
+    }
+
+
+    insertToOffload(offloaded, max_candidate);
+
+    for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
+      int offloading_point = graph_layers_[i->left]->start_layer_id;
+      int resume_point = graph_layers_[i->right]->end_layer_id;
+      result->push_back(make_pair(offloading_point, resume_point));
+    }
+    result->push_back(make_pair(-1, -1));
+
+    removeCandidates(candidates, max_candidate.left, max_candidate.right);
+    updateCandidates(candidates, max_candidate.left, max_candidate.right, graph, offloaded);
+    updateToProcess(toProcess, max_candidate.left, max_candidate.right);
+  }
+
+
+/*
+  createCandidateArea(graph, toProcess, candidates);
+  while(!toProcess.empty()){
+    offloadInfo max_candidate;
+    max_candidate = getMaxCandidate(candidates);
+    cout << "from: "<< max_candidate.left << " " << max_candidate.right << ". ";
+    offloadInfo smaller;
+    smaller =  getMaxCandidate(candidates, max_candidate.left, max_candidate.right);
+    while(smaller.left != -999){
+      max_candidate = smaller;
+      smaller = getMaxCandidate(candidates, max_candidate.left, max_candidate.right);
+    }
+    insertToOffload(offloaded, max_candidate);
+
+    for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
+      int offloading_point = graph_layers_[i->left]->start_layer_id;
+      int resume_point = graph_layers_[i->right]->end_layer_id;
+      result->push_back(make_pair(offloading_point, resume_point));
+    }
+    result->push_back(make_pair(-1, -1));
+
+    cout << "max candidate: " << max_candidate.left << " " << max_candidate.right << 
+         " " << max_candidate.gain <<  endl;
+    removeCandidates(candidates, max_candidate.left, max_candidate.right);
+    upload_size_remaining_ -= modelSize(max_candidate.left, max_candidate.right);
+    updateCandidates(candidates, graph, offloaded);
+    updateToProcess(toProcess, max_candidate.left, max_candidate.right);
+  }
+*/
+
+
+
+}
+
+void ExecutionGraph::createCandidate( list<pair<int,float> >* graph, 
+                                      list<offloadInfo > &toProcess,
+                                      list<offloadInfo > &candidates 
+                                      )  {
+
+  candidates.erase(candidates.begin(), candidates.end());
+  list<offloadInfo >::iterator blocks;
+  list<offloadInfo> empty;
+  for(blocks = toProcess.begin(); blocks != toProcess.end(); ++blocks) {
+    int range = blocks->right - blocks->left;
+    cout << blocks->right - blocks->left << endl;
+    for (int range_it = 0; range_it <= range; ++range_it){
+      for(int i = blocks->left; i <= blocks->right-range_it; ++i) {
+          offloadInfo temp;
+          temp.left = i;
+          temp.right = i+range_it;
+          temp.gain = gainPerCostSCDiff(graph, temp.left, temp.right, empty);
+          candidates.push_back(temp);
+      }
+    }
+  }
+}
+
+
+void ExecutionGraph::createCandidateArea( list<pair<int,float> >* graph, 
+                                      list<offloadInfo > &toProcess,
+                                      list<offloadInfo > &candidates 
+                                      )  {
+
+  candidates.erase(candidates.begin(), candidates.end());
+  list<offloadInfo >::iterator blocks;
+  list<offloadInfo> empty;
+  for(blocks = toProcess.begin(); blocks != toProcess.end(); ++blocks) {
+    int range = blocks->right - blocks->left;
+    for (int range_it = 0; range_it <= range; ++range_it){
+      for(int i = blocks->left; i <= blocks->right-range_it; ++i) {
+          offloadInfo temp;
+          temp.left = i;
+          temp.right = i+range_it;
+          temp.gain = areaPerCost(graph, temp.left, temp.right, empty);
+          candidates.push_back(temp);
+      }
+    }
+  }
+}
+
+
+offloadInfo ExecutionGraph::getMaxCandidate(list<offloadInfo > &candidates, int left, int right){
+  if(left == -1){
+    float temp = -1;
+    offloadInfo toReturn;
+    toReturn.left = -999;
+    list<offloadInfo >::iterator blocks;
+    for(blocks = candidates.begin(); blocks != candidates.end(); ++blocks){
+      if(blocks->gain > temp){
+        temp = blocks->gain;
+        toReturn = *blocks;
+      }
+    }
+    return toReturn;
+  }
+  else{
+    float temp = 0;
+    offloadInfo toReturn;
+    toReturn.left = -999;
+    list<offloadInfo >::iterator blocks;
+    for(blocks = candidates.begin(); blocks != candidates.end(); ++blocks){
+      if(blocks->gain > temp and blocks->left >= left and blocks->right <= right and (blocks->left != left or blocks->right != right) and (modelSize(blocks->left, blocks->right) != modelSize(left, right))){
+        temp = blocks->gain;
+        toReturn = *blocks;
+      }
+    }
+    return toReturn;
+  }
+}
+
+offloadInfo ExecutionGraph::getMaxCandidateFirst(list<offloadInfo > &candidates, list<pair<int,float> >* graph){
+  float temp = -1;
+  offloadInfo toReturn;
+  toReturn.left = -999;
+  list<offloadInfo >::iterator blocks;
+  for(blocks = candidates.begin(); blocks != candidates.end(); ++blocks){
+  float speedupwithupload = blocks->gain * modelSize(blocks->left, blocks->right)/(network_speed_*1000.0*1000.0/1024.0/1024.0) - modelSize(blocks->left, blocks->right)/(network_speed_*1000.0*1000.0/1024.0/1024.0);
+    if(speedupwithupload > temp and speedupwithupload > 0) {
+//      cout << blocks->left<<","<<blocks->right<<":"<<blocks->gain * modelSize(blocks->left, blocks->right)<<","<<blocks->gain<<endl;
+      temp = speedupwithupload;
+      cout << blocks->left << ","<<blocks->right<<":"<<temp << endl;
+      toReturn = *blocks;
+    }
+  }
+  return toReturn;
+}
+
+
+void ExecutionGraph::insertToOffload(list<offloadInfo> &offloaded, offloadInfo toOffload){
+
+  list<offloadInfo>::iterator it;
+  for(it = offloaded.begin(); it != offloaded.end() and it->left < toOffload.left; it++);
+  if(it != offloaded.begin()){
+    list<offloadInfo>::iterator temp;
+    temp = it;
+    temp--;
+    if(temp->right == toOffload.left - 1){
+      if(it != offloaded.end() and it->left == toOffload.right + 1){
+        temp->right = it->right;
+        it = offloaded.erase(it);
+      }
+      else {
+        temp->right = toOffload.right;
+      }
+    }
+    else if(it!=offloaded.end() and it->left == toOffload.right + 1){
+      it->left = toOffload.left;
+    }
+    else{
+      offloaded.insert(it, toOffload);
+    }
+  }
+  else if(it!= offloaded.end()){
+    if(it->left == toOffload.right + 1){
+      it->left = toOffload.left;
+    }
+    if(it->right == toOffload.left -1){
+      it->right = toOffload.right;
+    }
+  } 
+  else{
+    offloaded.push_back(toOffload);
+  }
+}
+
+int ExecutionGraph::getLeftRight(list<offloadInfo> &offloaded, int left, int right, bool getLeft){
+  list<offloadInfo>::iterator it;
+  it  = offloaded.begin();
+  int toReturn;
+  if(getLeft == true){
+    toReturn = left;
+    for(;it != offloaded.end();++it){
+      if(it->right == left - 1){
+        toReturn = it->left;
+      }
+    }
+  }
+  else{//getLeft == false
+    toReturn = right;
+    for(;it != offloaded.end();++it){
+      if(it->left == right + 1){
+        toReturn = it->right;
+      }
+    }
+  }
+  return toReturn;
+}
+
+void ExecutionGraph::removeCandidates( list<offloadInfo > &candidates, int left, int right){
+  int i = left;
+  int j = right;
+  for(list<offloadInfo>::iterator it = candidates.begin(); it != candidates.end(); ++it){
+    while(it != candidates.end() and (((*it).left >= i and it->left <= j) or (it->right >= i and (*it).right <= j) or (it->left < i and it->right > j))){
+      it = candidates.erase(it);
+    }
+  }
+}
+
+void ExecutionGraph::updateToProcess(list<offloadInfo> &toProcess, int left, int right){
+  int deleted = 0;
+  list<offloadInfo>::iterator it = toProcess.begin();
+  while(it != toProcess.end()){
+//    int right_temp = it->right;
+    int left_temp = it->left;
+    if(it->left < left){
+      if(it->right >= left){
+        if(it->right <= right){
+          it->right = left - 1;
+        }
+        else{
+          it->left = right + 1;
+          offloadInfo temp = {left_temp, left - 1, 0.0};
+          toProcess.insert(it, temp);
+        }
+      }
+    }
+    else if(it->left >= left and it->left <= right){
+      if(it->right <= right){
+        it = toProcess.erase(it);
+        deleted = 1;
+      }
+      else if(it->right > right){
+        it->left = right + 1;
+      }
+    }
+      
+    if(deleted == 0){
+      it++;
+    }
+    else{
+      deleted = 0;
+    }
+
+  }
+}
+
+void ExecutionGraph::updateCandidates(list<offloadInfo> &candidates, int left, int right, 
+                                      list<pair<int,float> >* graph, list<offloadInfo> &offloaded){
+  for(list<offloadInfo>::iterator it = candidates.begin(); it != candidates.end(); it++){
+    if(it->left == right+1 or it->right == left-1){
+      it->gain = gainDiffPerCost(graph, it->left, it->right, offloaded);
+    }
+  }
+}
+
+void ExecutionGraph::updateCandidates(list<offloadInfo> &candidates, list<pair<int,float> >* graph, list<offloadInfo> &offloaded){
+  for(list<offloadInfo>::iterator it = candidates.begin(); it != candidates.end(); it++){
+      it->gain = areaPerCost(graph, it->left, it->right, offloaded);
+  }
+//  cout << "updated all." << endl;
+}
+
 
 }  // namespace caffe

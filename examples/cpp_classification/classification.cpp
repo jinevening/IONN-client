@@ -270,7 +270,8 @@ int main(int argc, char** argv) {
 
 // 
   std::vector<Prediction> predictions;
-  for(int i=0; i<40; i++){
+  for(int i=0; i<35; i++){
+    usleep(500000);
     std::cout << "[Offloading " << i << " ]  :  ";
   predictions = classifier.Classify(img);
   }
