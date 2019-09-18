@@ -416,7 +416,11 @@ BOOST_PYTHON_MODULE(_caffe) {
     .def("reshape", &Net<Dtype>::Reshape)
     .def("clear_param_diffs", &Net<Dtype>::ClearParamDiffs)
     // The cast is to select a particular overload.
-    .def("copy_from", static_cast<void (Net<Dtype>::*)(const string)>(
+//<<<<<<< HEAD
+    .def("copy_from", static_cast<void (Net<Dtype>::*)(const string&)>(
+//=======
+//    .def("copy_from", static_cast<void (Net<Dtype>::*)(const string)>(
+//>>>>>>> work_old
         &Net<Dtype>::CopyTrainedLayersFrom))
     .def("share_with", &Net<Dtype>::ShareTrainedLayersWith)
     .add_property("_blob_loss_weights", bp::make_function(
@@ -464,6 +468,17 @@ BOOST_PYTHON_MODULE(_caffe) {
     .add_property("count",    static_cast<int (Blob<Dtype>::*)() const>(
         &Blob<Dtype>::count))
     .def("reshape",           bp::raw_function(&Blob_Reshape))
+//<<<<<<< HEAD
+#ifndef CPU_ONLY
+    .add_property("_gpu_data_ptr",
+        reinterpret_cast<uintptr_t (Blob<Dtype>::*)()>(
+          &Blob<Dtype>::mutable_gpu_data))
+    .add_property("_gpu_diff_ptr",
+        reinterpret_cast<uintptr_t (Blob<Dtype>::*)()>(
+          &Blob<Dtype>::mutable_gpu_diff))
+#endif
+//=======
+//>>>>>>> work_old
     .add_property("data",     bp::make_function(&Blob<Dtype>::mutable_cpu_data,
           NdarrayCallPolicies()))
     .add_property("diff",     bp::make_function(&Blob<Dtype>::mutable_cpu_diff,
@@ -482,7 +497,13 @@ BOOST_PYTHON_MODULE(_caffe) {
   bp::class_<SolverParameter>("SolverParameter", bp::no_init)
     .add_property("max_iter", &SolverParameter::max_iter)
     .add_property("display", &SolverParameter::display)
-    .add_property("layer_wise_reduce", &SolverParameter::layer_wise_reduce);
+//<<<<<<< HEAD
+    .add_property("layer_wise_reduce", &SolverParameter::layer_wise_reduce)
+    .add_property("base_lr", &SolverParameter::base_lr,
+           &SolverParameter::set_base_lr);
+//=======
+//    .add_property("layer_wise_reduce", &SolverParameter::layer_wise_reduce);
+//>>>>>>> work_old
   bp::class_<LayerParameter>("LayerParameter", bp::no_init);
 
   bp::class_<Solver<Dtype>, shared_ptr<Solver<Dtype> >, boost::noncopyable>(
@@ -499,12 +520,35 @@ BOOST_PYTHON_MODULE(_caffe) {
     .def("restore", &Solver<Dtype>::Restore)
     .def("snapshot", &Solver<Dtype>::Snapshot)
     .def("share_weights", &share_weights)
+//<<<<<<< HEAD
+    .def("apply_update", &Solver<Dtype>::ApplyUpdate)
     .add_property("param", bp::make_function(&Solver<Dtype>::param,
-              bp::return_value_policy<bp::copy_const_reference>()));
+              bp::return_internal_reference<>()));
+//=======
+//    .add_property("param", bp::make_function(&Solver<Dtype>::param,
+//              bp::return_value_policy<bp::copy_const_reference>()));
+//>>>>>>> work_old
   BP_REGISTER_SHARED_PTR_TO_PYTHON(Solver<Dtype>);
 
   bp::class_<SGDSolver<Dtype>, bp::bases<Solver<Dtype> >,
     shared_ptr<SGDSolver<Dtype> >, boost::noncopyable>(
+//<<<<<<< HEAD
+        "SGDSolver", bp::init<string>())
+        .add_property("lr", &SGDSolver<Dtype>::GetLearningRate);
+  bp::class_<NesterovSolver<Dtype>, bp::bases<SGDSolver<Dtype> >,
+    shared_ptr<NesterovSolver<Dtype> >, boost::noncopyable>(
+        "NesterovSolver", bp::init<string>());
+  bp::class_<AdaGradSolver<Dtype>, bp::bases<SGDSolver<Dtype> >,
+    shared_ptr<AdaGradSolver<Dtype> >, boost::noncopyable>(
+        "AdaGradSolver", bp::init<string>());
+  bp::class_<RMSPropSolver<Dtype>, bp::bases<SGDSolver<Dtype> >,
+    shared_ptr<RMSPropSolver<Dtype> >, boost::noncopyable>(
+        "RMSPropSolver", bp::init<string>());
+  bp::class_<AdaDeltaSolver<Dtype>, bp::bases<SGDSolver<Dtype> >,
+    shared_ptr<AdaDeltaSolver<Dtype> >, boost::noncopyable>(
+        "AdaDeltaSolver", bp::init<string>());
+  bp::class_<AdamSolver<Dtype>, bp::bases<SGDSolver<Dtype> >,
+/*=======
         "SGDSolver", bp::init<string>());
   bp::class_<NesterovSolver<Dtype>, bp::bases<Solver<Dtype> >,
     shared_ptr<NesterovSolver<Dtype> >, boost::noncopyable>(
@@ -519,6 +563,7 @@ BOOST_PYTHON_MODULE(_caffe) {
     shared_ptr<AdaDeltaSolver<Dtype> >, boost::noncopyable>(
         "AdaDeltaSolver", bp::init<string>());
   bp::class_<AdamSolver<Dtype>, bp::bases<Solver<Dtype> >,
+>>>>>>> work_old*/
     shared_ptr<AdamSolver<Dtype> >, boost::noncopyable>(
         "AdamSolver", bp::init<string>());
 

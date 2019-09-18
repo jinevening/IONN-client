@@ -233,6 +233,13 @@ int train() {
         GetRequestedAction(FLAGS_sigint_effect),
         GetRequestedAction(FLAGS_sighup_effect));
 
+  if (FLAGS_snapshot.size()) {
+    solver_param.clear_weights();
+  } else if (FLAGS_weights.size()) {
+    solver_param.clear_weights();
+    solver_param.add_weights(FLAGS_weights);
+  }
+
   shared_ptr<caffe::Solver<float> >
       solver(caffe::SolverRegistry<float>::CreateSolver(solver_param));
 
@@ -413,6 +420,13 @@ int time() {
     LOG(INFO) << std::setfill(' ') << std::setw(10) << layername <<
       "\tforward: " << forward_time_per_layer[i] / 1000 /
       FLAGS_iterations << " ms.";
+//<<<<<<< HEAD
+//    LOG(INFO) << std::setfill(' ') << std::setw(10) << layername  <<
+//      "\tbackward: " << backward_time_per_layer[i] / 1000 /
+//      FLAGS_iterations << " ms.";
+//  }
+//  total_timer.Stop();
+//=======
     LOG(INFO) << std::setfill(' ') << std::setw(10) << layername <<
       "\tbackward: " << backward_time_per_layer[i] / 1000 /
       FLAGS_iterations << " ms.";
@@ -422,6 +436,7 @@ int time() {
   predictionModel.close();
   total_timer.Stop();
   LOG(INFO) << "Prediction Model Saved.";
+//>>>>>>> work_old
   LOG(INFO) << "Average Forward pass: " << forward_time / 1000 /
     FLAGS_iterations << " ms.";
   LOG(INFO) << "Average Backward pass: " << backward_time / 1000 /

@@ -23,10 +23,18 @@ class SGDSolver : public Solver<Dtype> {
 
   const vector<shared_ptr<Blob<Dtype> > >& history() { return history_; }
 
+//<<<<<<< HEAD
+  virtual void ApplyUpdate();
+  Dtype GetLearningRate();
+
  protected:
   void PreSolve();
-  Dtype GetLearningRate();
-  virtual void ApplyUpdate();
+//=======
+// protected:
+//  void PreSolve();
+//  Dtype GetLearningRate();
+//  virtual void ApplyUpdate();
+//>>>>>>> work_old
   virtual void Normalize(int param_id);
   virtual void Regularize(int param_id);
   virtual void ComputeUpdateValue(int param_id, Dtype rate);

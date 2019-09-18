@@ -33,6 +33,13 @@ def parse_args():
                               'TEST, or ALL.  If ALL, then all layers are drawn '
                               'regardless of phase.'),
                         default="ALL")
+#<<<<<<< HEAD
+    parser.add_argument('--display_lrm', action='store_true',
+                        help=('Use this flag to visualize the learning rate '
+                              'multiplier, when non-zero, for the learning '
+                              'layers (Convolution, Deconvolution, InnerProduct).'))
+#=======
+#>>>>>>> work_old
 
     args = parser.parse_args()
     return args
@@ -51,7 +58,11 @@ def main():
     elif args.phase != "ALL":
         raise ValueError("Unknown phase: " + args.phase)
     caffe.draw.draw_net_to_file(net, args.output_image_file, args.rankdir,
-                                phase)
+#<<<<<<< HEAD
+                                phase, args.display_lrm)
+#=======
+#                                phase)
+#>>>>>>> work_old
 
 
 if __name__ == '__main__':

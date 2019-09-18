@@ -2,23 +2,32 @@
 #define CAFFE_NET_HPP_
 
 #include <map>
+//<<<<<<< HEAD
+//=======
 #include <list>
+//>>>>>>> work_old
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+//<<<<<<< HEAD
+//=======
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
 
+//>>>>>>> work_old
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
+//<<<<<<< HEAD
+//=======
 using boost::asio::ip::tcp;
 using namespace std;
 
+//>>>>>>> work_old
 namespace caffe {
 
 /**
@@ -128,14 +137,22 @@ class Net {
    *        another Net.
    */
   void CopyTrainedLayersFrom(const NetParameter& param);
-  void CopyTrainedLayersFrom(const string trained_filename);
-  void CopyTrainedLayersFromBinaryProto(const string trained_filename);
-  void CopyTrainedLayersFromHDF5(const string trained_filename);
+//<<<<<<< HEAD
+//  void CopyTrainedLayersFrom(const string& trained_filename);
+//  void CopyTrainedLayersFromBinaryProto(const string& trained_filename);
+//  void CopyTrainedLayersFromHDF5(const string& trained_filename);
+//  /// @brief Writes the net to a proto.
+//  void ToProto(NetParameter* param, bool write_diff = false) const;
+//=======
+  void CopyTrainedLayersFrom(const string& trained_filename);
+  void CopyTrainedLayersFromBinaryProto(const string& trained_filename);
+  void CopyTrainedLayersFromHDF5(const string& trained_filename);
   /// @brief Writes the net to a proto.
   void ToProto(NetParameter* param, bool write_diff = false) const;
   /// @brief Writes the partial net to a proto
   void ToProto(NetParameter* param, bool write_diff, int& start, int& end, bool add_input) const;
   void ToProtoNoBlob(NetParameter* param, bool write_diff, int start, int end, bool add_input) const;
+//>>>>>>> work_old
   /// @brief Writes the net to an HDF5 file.
   void ToHDF5(const string& filename, bool write_diff = false) const;
 
@@ -233,7 +250,10 @@ class Net {
   const shared_ptr<Blob<Dtype> > blob_by_name(const string& blob_name) const;
   bool has_layer(const string& layer_name) const;
   const shared_ptr<Layer<Dtype> > layer_by_name(const string& layer_name) const;
+//<<<<<<< HEAD
+//=======
   int layer_id_by_name(const string& layer_name) const;
+//>>>>>>> work_old
 
   void set_debug_info(const bool value) { debug_info_ = value; }
 
@@ -248,11 +268,14 @@ class Net {
   static bool StateMeetsRule(const NetState& state, const NetStateRule& rule,
       const string& layer_name);
 
+//<<<<<<< HEAD
+//=======
   // Prediction Model
   bool server_predict(const string& prediction_file = "");
   void server_predict_from_profile(const string& prediction_file = "");
   void client_predict(const string& prediction_file = "");
 
+//>>>>>>> work_old
   // Invoked at specific points during an iteration
   class Callback {
    protected:
@@ -278,6 +301,8 @@ class Net {
     after_backward_.push_back(value);
   }
 
+//<<<<<<< HEAD
+//=======
   // Get layers which will be sent to the server (exclude already transmitted layers)
   // This returns <front part, rear part>
 //  pair<pair<int, int>, pair<int, int> > getOffloadedLayersForIncrementalOffloading(int start, int end);
@@ -285,6 +310,7 @@ class Net {
   // Setting socket
   void SetSocket(tcp::socket* s) {s_ = s;}
 
+//>>>>>>> work_old
  protected:
   // Helpers for Init.
   /// @brief Append a new top blob to the net.
@@ -369,9 +395,12 @@ class Net {
   vector<Callback*> before_backward_;
   vector<Callback*> after_backward_;
 
+//<<<<<<< HEAD
+//=======
   // Variable for connection with server
   tcp::socket* s_;
 
+//>>>>>>> work_old
 DISABLE_COPY_AND_ASSIGN(Net);
 };
 

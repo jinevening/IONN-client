@@ -52,8 +52,11 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* bottom_label = bottom[1]->cpu_data();
   const int dim = bottom[0]->count() / outer_num_;
   const int num_labels = bottom[0]->shape(label_axis_);
-  vector<Dtype> maxval(top_k_+1);
-  vector<int> max_id(top_k_+1);
+//<<<<<<< HEAD
+//=======
+//  vector<Dtype> maxval(top_k_+1);
+//  vector<int> max_id(top_k_+1);
+//>>>>>>> work_old
   if (top.size() > 1) {
     caffe_set(nums_buffer_.count(), Dtype(0), nums_buffer_.mutable_cpu_data());
     caffe_set(top[1]->count(), Dtype(0), top[1]->mutable_cpu_data());
@@ -66,6 +69,24 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       if (has_ignore_label_ && label_value == ignore_label_) {
         continue;
       }
+//<<<<<<< HEAD
+      DCHECK_GE(label_value, 0);
+      DCHECK_LT(label_value, num_labels);
+      if (top.size() > 1) ++nums_buffer_.mutable_cpu_data()[label_value];
+      const Dtype prob_of_true_class = bottom_data[i * dim
+                                                   + label_value * inner_num_
+                                                   + j];
+      int num_better_predictions = -1;  // true_class also counts as "better"
+      // Top-k accuracy
+      for (int k = 0; k < num_labels && num_better_predictions < top_k_; ++k) {
+        num_better_predictions +=
+          (bottom_data[i * dim + k * inner_num_ + j] >= prob_of_true_class);
+      }
+      // check if there are less than top_k_ predictions
+      if (num_better_predictions < top_k_) {
+        ++accuracy;
+        if (top.size() > 1) ++top[1]->mutable_cpu_data()[label_value];
+/*=======
       if (top.size() > 1) ++nums_buffer_.mutable_cpu_data()[label_value];
       DCHECK_GE(label_value, 0);
       DCHECK_LT(label_value, num_labels);
@@ -85,13 +106,18 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
           if (top.size() > 1) ++top[1]->mutable_cpu_data()[label_value];
           break;
         }
+>>>>>>> work_old*/
       }
       ++count;
     }
   }
 
   // LOG(INFO) << "Accuracy: " << accuracy;
-  top[0]->mutable_cpu_data()[0] = accuracy / count;
+//<<<<<<< HEAD
+  top[0]->mutable_cpu_data()[0] = (count == 0) ? 0 : (accuracy / count);
+//=======
+//  top[0]->mutable_cpu_data()[0] = accuracy / count;
+//>>>>>>> work_old
   if (top.size() > 1) {
     for (int i = 0; i < top[1]->count(); ++i) {
       top[1]->mutable_cpu_data()[i] =
@@ -102,6 +128,13 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   // Accuracy layer should not be used as a loss function.
 }
 
+//<<<<<<< HEAD
+#ifdef CPU_ONLY
+STUB_GPU(AccuracyLayer);
+#endif
+
+//=======
+//>>>>>>> work_old
 INSTANTIATE_CLASS(AccuracyLayer);
 REGISTER_LAYER_CLASS(Accuracy);
 

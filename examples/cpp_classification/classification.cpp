@@ -263,6 +263,9 @@ int main(int argc, char** argv) {
 
   cv::Mat img = cv::imread(file, -1);
   CHECK(!img.empty()) << "Unable to decode image " << file;
+//<<<<<<< HEAD
+//  std::vector<Prediction> predictions = classifier.Classify(img);
+//=======
 
   std::ofstream timeFile("time_measurement.csv", std::ios::app);
   timeFile << ",Local";
@@ -276,6 +279,7 @@ int main(int argc, char** argv) {
   predictions = classifier.Classify(img);
   }
 //
+//>>>>>>> work_old
 
   /* Print the top N predictions. */
   for (size_t i = 0; i < predictions.size(); ++i) {
