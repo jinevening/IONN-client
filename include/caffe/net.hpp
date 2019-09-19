@@ -27,6 +27,9 @@
 using boost::asio::ip::tcp;
 using namespace std;
 
+extern int total_uploaded_feature;
+extern int total_downloaded_feature;
+
 //>>>>>>> work_old
 namespace caffe {
 
@@ -301,8 +304,6 @@ class Net {
     after_backward_.push_back(value);
   }
 
-//<<<<<<< HEAD
-//=======
   // Get layers which will be sent to the server (exclude already transmitted layers)
   // This returns <front part, rear part>
 //  pair<pair<int, int>, pair<int, int> > getOffloadedLayersForIncrementalOffloading(int start, int end);
@@ -310,7 +311,6 @@ class Net {
   // Setting socket
   void SetSocket(tcp::socket* s) {s_ = s;}
 
-//>>>>>>> work_old
  protected:
   // Helpers for Init.
   /// @brief Append a new top blob to the net.

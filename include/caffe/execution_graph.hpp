@@ -145,6 +145,7 @@ class ExecutionGraph {
   float distClient(list<pair<int,float> >* graph, int left, int right);
   float distServer(list<pair<int,float> >* graph, int left, int right);
   float gain(list<pair<int,float> >* graph, int left, int right);
+  float expectedTime(list<pair<int, float> >* graph, list<offloadInfo> offloaded);
   float gainPerCostSCDiff(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded);
   float gainDiffPerCost(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded);
   float areaPerCost(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded);

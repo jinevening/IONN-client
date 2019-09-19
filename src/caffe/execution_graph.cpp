@@ -472,7 +472,7 @@ void ExecutionGraph::shortestPathOld(OptTarget opt_target, list<pair<int, int> >
       int offloading_point = graph_layers_[(path[node] - 1)/nodes_per_layer]->start_layer_id;
       int resume_point = graph_layers_[(resume_node - 1)/nodes_per_layer]->end_layer_id;
 
-      result->push_front(make_pair(-1, -1));
+//      result->push_front(make_pair(-1, -1));
       result->push_front(make_pair(offloading_point, resume_point));
     }
 
@@ -552,6 +552,14 @@ float ExecutionGraph::gain(list<pair<int,float> >* graph, int left, int right) {
   float speedup;
   speedup = distClient(graph, left, right) - distServer(graph, left, right);
   return speedup;
+}
+
+float ExecutionGraph::expectedTime(list<pair<int, float> >* graph, list<offloadInfo> offloaded){
+  float speedup = 0;
+  for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++){
+    speedup += gain(graph, i->left, i->right);
+  }
+  return distClient(graph, 0, graph_layers_.size()-1 ) - speedup;
 }
 
 float ExecutionGraph::gainPerCostSCDiff(list<pair<int,float> >* graph, int left, int right, list<offloadInfo> &offloaded) {
@@ -721,6 +729,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
       int res_index = (resume_node1-1)/nodes_per_layer;
 
       offloadInfo t = {off_index, res_index, gainPerCostSCDiff(graph, off_index, res_index, offloaded)};
+
       upload_size_remaining_ += modelSize(off_index, res_index);
       toProcess.push_back(t);
 
@@ -732,12 +741,15 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
 
 
   createCandidate(graph, toProcess, candidates);
+  cout << "expected speed local: " << expectedTime(graph, offloaded) << endl;
 
 
   offloadInfo max_candidate;
   max_candidate = getMaxCandidateFirst(candidates, graph);
   if(max_candidate.left != -999){ // if valid first candidate
     insertToOffload(offloaded, max_candidate);
+    cout << "expected speed initial stage " << max_candidate.left<<" " << max_candidate.right<< ": " << expectedTime(graph, offloaded) << endl;
+
     for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
       int offloading_point = graph_layers_[i->left]->start_layer_id;
       int resume_point = graph_layers_[i->right]->end_layer_id;
@@ -749,8 +761,6 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
     updateCandidates(candidates, max_candidate.left, max_candidate.right, graph, offloaded);
     updateToProcess(toProcess, max_candidate.left, max_candidate.right);
   }
-
-
 
   while(!toProcess.empty()){
     offloadInfo max_candidate;
@@ -766,6 +776,8 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
 
 
     insertToOffload(offloaded, max_candidate);
+    cout << "expected speed after "<< max_candidate.left << " " << max_candidate.right << ": " << expectedTime(graph, offloaded) << endl;
+
 
     for(list<offloadInfo>::iterator i = offloaded.begin(); i != offloaded.end(); i++) {
       int offloading_point = graph_layers_[i->left]->start_layer_id;

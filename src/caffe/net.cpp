@@ -743,6 +743,8 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
       std::cerr << "Exception in thread: " << e.what() << "\n";
       return;
     }
+    total_uploaded_feature += feature_size + 4;
+    total_downloaded_feature += output_size + 8;
     cout << "Received " << buffer_ptr - buff << " bytes" << endl;
 
     // Receive results
@@ -1118,7 +1120,7 @@ void Net<Dtype>::ToProtoNoBlob(NetParameter* param, bool write_diff, int start, 
 
     // change original bottom name to 'data'
     string original_name = layers_[start]->layer_param().bottom(0);
-    cout << "Size: " << layers_[start]->layer_param().blobs_size() << endl;
+//    cout << "Size: " << layers_[start]->layer_param().blobs_size() << endl;
 
     cout << "Original bottom name: " << original_name << endl;
     for (int i = start; i <= end; i++) {
