@@ -766,7 +766,7 @@ void ExecutionGraph::shortestPath(OptTarget opt_target, list<pair<int, int> >* r
     offloadInfo max_candidate;
     max_candidate = getMaxCandidate(candidates);
 
-
+    //comment 6 lines for non-recursive version
     offloadInfo smaller;
     smaller =  getMaxCandidate(candidates, max_candidate.left, max_candidate.right);
     while(smaller.left != -999){

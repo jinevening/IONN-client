@@ -400,7 +400,8 @@ bool Net<Dtype>::server_predict(const string& prediction_file){
 	for(int i=0; i<layers_.size(); ++i){
 		const LayerParameter& layer_param = layers_[i]->layer_param();
 		if(layer_param.name().find("split") != string::npos)continue;
-		float execution_time = 1.0;
+		if(layer_param.name().find("reshape") != string::npos)continue;
+  	float execution_time = 1.0;
 		string TypeName = layer_param.type();
 		long long InputSize = 1;
 		for(int j=1; j<top_vecs_[i][0]->shape().size(); ++j)InputSize *= top_vecs_[i][0]->shape(j);
@@ -416,6 +417,15 @@ bool Net<Dtype>::server_predict(const string& prediction_file){
 						* conv_param.kernel_size(0) * conv_param.kernel_size(0)
 						* bottom_vecs_[i][0]->shape(1);
 		}
+    if(TypeName == "Deconvolution"){
+      const ConvolutionParameter& conv_param = layer_param.convolution_param();
+   		for(int j=1; j<top_vecs_[i][0]->shape().size(); ++j)InputSize /= top_vecs_[i][0]->shape(j);
+  		for(int j=1; j<top_vecs_[i][0]->shape().size(); ++j)InputSize *= bottom_vecs_[i][0]->shape(j);
+      InputSize /= bottom_vecs_[i][0]->shape(1);
+			InputSize = InputSize * conv_param.num_output()
+						* conv_param.kernel_size(0) * conv_param.kernel_size(0)
+						* top_vecs_[i][0]->shape(1);
+    }
 		else if(TypeName == "Pooling"){
 			const PoolingParameter& pool_param = layer_param.pooling_param();
 			InputSize = InputSize * pool_param.kernel_size() * pool_param.kernel_size();
@@ -431,6 +441,9 @@ bool Net<Dtype>::server_predict(const string& prediction_file){
 		if(TypeName == "Input"){
 			execution_time = 0.001;
 		}
+    else if(TypeName == "TanH"){
+      execution_time = 0.001;
+    }
 		else{
 			execution_time = a * InputSize + b;
 		}
@@ -665,11 +678,20 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
   double timechk;
 	struct timeval start_t;
 	struct timeval finish_t;
+  struct timeval finish_t2;
 
   /* Local execution */
   if (plan == NULL) {
     cout <<"Local execution " << endl;
+    gettimeofday(&start_t, NULL);
+
     ForwardFromTo(0, layers_.size() - 1);
+    gettimeofday(&finish_t, NULL);
+
+    timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
+              (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
+
+    cout << "Forwarding locally took " << timechk << " seconds"<<endl;
     return;
   }
 
@@ -713,6 +735,8 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
 //    gettimeofday(&start_t, NULL);
     boost::asio::write(*s_, boost::asio::buffer(buff, 4 + feature_size));
     tcdrain(s_->native_handle());
+    gettimeofday(&finish_t2, NULL);
+
 //    gettimeofday(&finish_t, NULL);
 //    timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
 //    (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
@@ -743,8 +767,10 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
       std::cerr << "Exception in thread: " << e.what() << "\n";
       return;
     }
-    total_uploaded_feature += feature_size + 4;
-    total_downloaded_feature += output_size + 8;
+//    extern int total_uploaded_feature;
+//    extern int total_downloaded_feature;
+//    total_uploaded_feature += feature_size + 4;
+//    total_downloaded_feature += output_size + 8;
     cout << "Received " << buffer_ptr - buff << " bytes" << endl;
 
     // Receive results
@@ -767,12 +793,28 @@ void Net<Dtype>::Forward(list<pair<int, int> >* plan, Dtype* loss) {
     /* Set next starting point */
 //    start = resume_point + 1;
     start = computed_upto + 1;
+    gettimeofday(&finish_t, NULL);
+    timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
+              (double)(finish_t2.tv_sec) - (double)(finish_t2.tv_usec) / 1000000.0;
+    double timechk2 = (double)(finish_t2.tv_sec) + (double)(finish_t2.tv_usec) / 1000000.0 -
+              (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
+    cout << "Time to send data: " << timechk2 <<" s. get data from server: " << timechk << " s" << endl;
+
   }
+
+  gettimeofday(&start_t, NULL);
 
   /* Execute the rest of DNN (if there is any) */
   if (start < layers_.size()) {
     ForwardFromTo(start, layers_.size() - 1);
   }
+
+  gettimeofday(&finish_t, NULL);
+
+  timechk = (double)(finish_t.tv_sec) + (double)(finish_t.tv_usec) / 1000000.0 -
+              (double)(start_t.tv_sec) - (double)(start_t.tv_usec) / 1000000.0;
+
+  cout << "Forwarding remaining layers took " << timechk << " seconds"<<endl;
 
   delete buff;
 }
