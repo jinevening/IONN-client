@@ -926,7 +926,7 @@ void Classifier::Preprocess(const cv::Mat& img,
 }
 
 int main(int argc, char** argv) {
-  if (argc != 13) {
+  if (argc != 14) {
     std::cerr << "Usage: " << argv[0]
               << " deploy.prototxt network.caffemodel"
               << " mean.binaryproto labels.txt server_predict.txt client_predict.txt 80(Mbps) img.jpg 0.5(K_value) incremental time(opt_target) use_file IP_address" << std::endl;
